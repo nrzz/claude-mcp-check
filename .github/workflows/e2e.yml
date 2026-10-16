@@ -13,6 +13,11 @@ on:
   schedule:
     - cron: "41 6 * * 1"
   workflow_dispatch:
+    inputs:
+      claude_version:
+        description: "Version of @anthropic-ai/claude-code to install (default: the newest)"
+        required: false
+        default: "latest"
 
 jobs:
   claude:
@@ -28,7 +33,7 @@ jobs:
         with:
           node-version: 22
       - name: Install the Claude Code CLI (the checks skip if this fails)
-        run: npm install -g @anthropic-ai/claude-code
+        run: npm install -g @anthropic-ai/claude-code@${{ inputs.claude_version || 'latest' }}
         continue-on-error: true
       - run: claude --version
         continue-on-error: true
