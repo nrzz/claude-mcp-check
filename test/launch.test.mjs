@@ -61,9 +61,9 @@ test("the endpoint: a command and its arguments, or a normalized URL", () => {
   assert.notEqual(a, endpointOf({ type: "http", url: "https://example.com/mcp?x=1" }));
 });
 
-test("a command string is split on spaces and tabs, double quotes group, single quotes and backslashes do not", () => {
+test("on Windows a command string is split on spaces and tabs, double quotes group, single quotes and backslashes do not", () => {
   const base = tmpDir("cmc-split-");
-  const opts = { env: { PATH: "" }, cwd: base, platform: process.platform };
+  const opts = { env: { PATH: "" }, cwd: base, platform: "win32" };
   assert.deepEqual(splitCommand("node", opts), ["node"]);
   assert.deepEqual(splitCommand("node a b", opts), ["node", "a", "b"]);
   assert.deepEqual(splitCommand("node\ta   b", opts), ["node", "a", "b"]);
@@ -74,6 +74,19 @@ test("a command string is split on spaces and tabs, double quotes group, single 
   assert.deepEqual(splitCommand("node a ", opts), ["node", "a"], "a trailing space adds nothing");
   assert.deepEqual(splitCommand(" node", opts), ["", "node"], "a leading space makes an empty command, which cannot start");
   assert.deepEqual(splitCommand("node | cat", opts), ["node", "|", "cat"], "no shell syntax");
+});
+
+test("on Linux and macOS a command string is not split: the whole string is the name of the program", () => {
+  const base = tmpDir("cmc-split3-");
+  for (const platform of ["linux", "darwin"]) {
+    const opts = { env: { PATH: "" }, cwd: base, platform };
+    for (const command of ["node", "node a b", "node\ta   b", 'node "a b" c', '"/usr/bin/node" s.js', "node 'a b'", " node", "node | cat"]) assert.deepEqual(splitCommand(command, opts), [command], `${platform}: ${command}`);
+  }
+  // so a command line in one string starts nothing there, and the arguments stay where they are
+  const spec = launchSpec({ entry: { command: "node s.js --flag", args: ["x"] }, type: "stdio", kind: "user" }, { project: base, childEnv: {}, expansionEnv: {}, platform: "linux" });
+  assert.equal(spec.command, "node s.js --flag");
+  assert.deepEqual(spec.args, ["x"]);
+  assert.equal(spec.resolved.found, false);
 });
 
 test("a command string that is a file as a whole (a path with a space) stays whole", () => {
@@ -143,14 +156,18 @@ test("the environment of the child: process, settings env, CLAUDE_PROJECT_DIR, t
   assert.deepEqual(spec.args, ["a"]);
 });
 
-test("the words of a command string go in front of the arguments", () => {
+test("the words of a command string go in front of the arguments on Windows; elsewhere the string is the one word of the program", () => {
   const w = world("l5");
   w.claudeJson({ mcpServers: { x: { command: `"${NODE}" some.js --flag`, args: ["last"] } } });
   const { ctx, def } = defOf(w, "x");
-  const spec = launchSpec(def, ctx);
-  assert.equal(spec.command, NODE);
-  assert.deepEqual(spec.args, ["some.js", "--flag", "last"]);
-  assert.equal(spec.resolved.found, true);
+  const onWindows = launchSpec(def, { ...ctx, platform: "win32" });
+  assert.equal(onWindows.command, NODE);
+  assert.deepEqual(onWindows.args, ["some.js", "--flag", "last"]);
+  const elsewhere = launchSpec(def, { ...ctx, platform: "linux" });
+  assert.equal(elsewhere.command, `"${NODE}" some.js --flag`);
+  assert.deepEqual(elsewhere.args, ["last"]);
+  assert.equal(elsewhere.resolved.found, false, "and a program of that name is not there");
+  if (IS_WIN) assert.equal(launchSpec(def, ctx).resolved.found, true);
 });
 
 test("the command line for cmd.exe quotes every argument", () => {

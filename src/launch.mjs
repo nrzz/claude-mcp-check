@@ -133,12 +133,18 @@ export function resolveCommand(command, { env, cwd, platform = process.platform 
   return out;
 }
 
+/** What claude mcp list says for a command that is not there: ENOENT on Linux and macOS, CONNECTION_CLOSED on Windows (2.1.295 to 2.1.301). */
+export const notFoundWords = (platform = process.platform) => (platform === "win32" ? "CONNECTION_CLOSED: Connection closed" : "ENOENT");
+
 /**
- * A command string split into words the way the binary did: on spaces and tabs, double quotes group (and are removed),
- * single quotes and backslashes do nothing special, nothing is run by a shell. A string that is a file as a whole (a path
- * with a space in it) stays whole. The first word is the command, the others go in front of `args`.
+ * A command string split into words the way the binary did on Windows (2.1.295 and 2.1.299): on spaces and tabs, double quotes
+ * group (and are removed), single quotes and backslashes do nothing special, nothing is run by a shell. A string that is a file
+ * as a whole (a path with a space in it) stays whole. The first word is the command, the others go in front of `args`.
+ * On Linux and macOS the binary split nothing (2.1.295, 2.1.299 and 2.1.301 alike): the whole string was the name of the
+ * program, and a string with a space in it that is not a file failed with ENOENT. So there it is one word.
  */
-export function splitCommand(command, opts) {
+export function splitCommand(command, opts = {}) {
+  if ((opts.platform || process.platform) !== "win32") return [command];
   if (!/[ \t]/.test(command)) return [command];
   if (resolveCommand(command, opts).found) return [command];
   const words = [];

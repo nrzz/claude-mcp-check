@@ -6,8 +6,7 @@
 //   error     Claude Code drops something the file says (the whole file, a server, a setting)
 //   warning   the configuration still applies, but something in it is probably not what you meant
 //   note      worth knowing, nothing is lost
-import { launchSpec } from "./launch.mjs";
-import { endpointOf } from "./launch.mjs";
+import { endpointOf, launchSpec, notFoundWords } from "./launch.mjs";
 import { locator } from "./servers.mjs";
 import { redactUrl } from "./redact.mjs";
 import { isObject } from "./jsonfile.mjs";
@@ -74,7 +73,7 @@ export function lintModel(ctx, model) {
     if (view.type === "stdio") {
       const spec = launchSpec(def, ctx, view);
       if (!spec.resolved.found) {
-        add({ id: "command-not-found", severity: "warning", effect: "server", ...defFields(def), message: `"${s.name}": the command "${spec.command}" is ${spec.resolved.reason === "not-executable" ? "not executable" : "not on the PATH"}${spec.resolved.reason === "not-executable" ? "" : ` (the PATH of the server's env, ${spec.resolved.searched.length} folder${spec.resolved.searched.length === 1 ? "" : "s"})`}`, does: "the server cannot start; Claude Code reports only \"CONNECTION_CLOSED: Connection closed\"", fix: "Install it, or write its full path in `command`." });
+        add({ id: "command-not-found", severity: "warning", effect: "server", ...defFields(def), message: `"${s.name}": the command "${spec.command}" is ${spec.resolved.reason === "not-executable" ? "not executable" : "not on the PATH"}${spec.resolved.reason === "not-executable" ? "" : ` (the PATH of the server's env, ${spec.resolved.searched.length} folder${spec.resolved.searched.length === 1 ? "" : "s"})`}`, does: `the server cannot start; Claude Code reports ${ctx.platform === "win32" ? "only " : ""}"${notFoundWords(ctx.platform)}"`, fix: ctx.platform !== "win32" && /\s/.test(spec.command) ? "Put the program alone in `command` and its arguments in `args`: Claude Code does not split `command` at spaces on Linux and macOS." : "Install it, or write its full path in `command`." });
       }
     }
     // variables

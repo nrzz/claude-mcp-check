@@ -104,3 +104,21 @@ test("a secret in an argument or a URL is never in a finding", async () => {
   const out = JSON.stringify(await lint(w)) + (await run(["lint"], w)).out + (await run(["lint", "--markdown"], w)).out;
   assert.ok(!out.includes("abcdefghijklmnop") && !out.includes("abc123secret"));
 });
+
+test("a command written as a whole command line: Claude Code does not split it on Linux and macOS, and lint and why say so", async () => {
+  const w = world("lint7");
+  w.claudeJson({ mcpServers: { s: { command: "definitely-not-installed-xyz -y some-server" } } });
+  const linux = (await run(["lint", "--json"], w, { platform: "linux" })).json();
+  const f = linux.findings.find((x) => x.id === "command-not-found");
+  assert.ok(f, "the whole string is looked for as a program");
+  assert.match(f.fix, /does not split `command` at spaces on Linux and macOS/);
+  assert.match(f.does, /"ENOENT"/);
+  const windows = (await run(["lint", "--json"], w, { platform: "win32" })).json();
+  const g = windows.findings.find((x) => x.id === "command-not-found");
+  assert.ok(g, "on Windows the first word is looked for");
+  assert.match(g.does, /CONNECTION_CLOSED/);
+  assert.doesNotMatch(g.fix, /split/);
+  const why = (await run(["why", "s", "--json", "--timeout", "2000"], w, { platform: "linux" })).json();
+  assert.equal(why.cause, "command-not-found");
+  assert.match(why.fix, /does not split `command` at spaces on Linux and macOS/);
+});

@@ -6,6 +6,7 @@
 //          variable-unset variable-empty non-json-stdout early-exit timeout handshake-error tools-list-failed
 //          needs-login endpoint-not-found wrong-transport server-error unreachable tls-error redirect not-mcp not-probed ok
 import { checkServer } from "./check.mjs";
+import { notFoundWords } from "./launch.mjs";
 
 const lastLines = (text, n = 6) => String(text || "").split(/\r?\n/).map((l) => l.trimEnd()).filter(Boolean).slice(-n).map((l) => (l.length > 200 ? `${l.slice(0, 200)}…` : l));
 const list = (items) => items.map((x) => `\${${x.name}}`).join(", ");
@@ -81,8 +82,8 @@ export function classify(ctx, server, r, { timeoutMs, mcpTimeout } = {}) {
       } else if (code === "ENOENT") {
         out.cause = "command-not-found";
         out.summary = `the command "${r.command.command}" was not found`;
-        out.details.push(`It was looked up in the PATH of the server's environment${r.command.searched.length ? ` (${r.command.searched.length} folders, the first: ${r.command.searched.slice(0, 3).join(", ")})` : ""} and, for a relative name, in the project folder. Claude Code reports this as "CONNECTION_CLOSED: Connection closed", which does not say so.`);
-        out.fix = "Install it, or write the full path in `command`. The PATH in the server's `env` counts, and so does the PATH of the shell that starts Claude Code.";
+        out.details.push(`It was looked up in the PATH of the server's environment${r.command.searched.length ? ` (${r.command.searched.length} folders, the first: ${r.command.searched.slice(0, 3).join(", ")})` : ""} and, for a relative name, in the project folder. Claude Code reports this as "${notFoundWords(ctx.platform)}"${ctx.platform === "win32" ? ", which does not say so" : ""}.`);
+        out.fix = ctx.platform !== "win32" && /\s/.test(r.command.command) ? "Put the program alone in `command` and its arguments in `args`: Claude Code does not split `command` at spaces on Linux and macOS." : "Install it, or write the full path in `command`. The PATH in the server's `env` counts, and so does the PATH of the shell that starts Claude Code.";
       } else {
         out.cause = "spawn-failed";
         out.summary = `the process could not be started (${code}: ${p.spawnError.message})`;
