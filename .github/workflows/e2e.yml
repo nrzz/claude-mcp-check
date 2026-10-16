@@ -1,0 +1,41 @@
+name: e2e
+
+# The checks that run the real Claude Code: where MCP servers come from and which definition wins, what `claude mcp list` and
+# `claude mcp get` say for each state, how ${VAR} is expanded, how a command is found, what the first request of a run carries,
+# what happens to a file that is edited, and that the plugin validates and its skill hands the model the lint report. They cost
+# nothing: Claude Code talks to a fake server on 127.0.0.1, and the MCP servers are a small program in test/. Optional by
+# design: if the binary cannot be installed, the checks skip. Weekly, so a Claude Code release that changes how it reads MCP
+# configuration shows up here. The last step starts a real third-party server and needs the network.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "41 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  claude:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install the Claude Code CLI (the checks skip if this fails)
+        run: npm install -g @anthropic-ai/claude-code
+        continue-on-error: true
+      - run: claude --version
+        continue-on-error: true
+      - name: MCP, plugin and skill checks against the real binary
+        run: node --test test/e2e-claude.test.mjs
+        env:
+          E2E_CLAUDE: claude
+      - name: check against a real third-party server (needs the network)
+        run: node test/everything.mjs run
+        continue-on-error: true

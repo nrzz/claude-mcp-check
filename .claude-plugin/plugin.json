@@ -1,0 +1,15 @@
+{
+  "name": "mcp-check",
+  "displayName": "MCP Check",
+  "version": "1.0.0",
+  "description": "Every MCP server Claude Code would load, from which file, whether it starts, and what its tools cost. One user-only skill: /mcp-check:check.",
+  "author": { "name": "Naresh Prabu" },
+  "homepage": "https://github.com/nrzz/claude-mcp-check",
+  "repository": "https://github.com/nrzz/claude-mcp-check",
+  "documentationUrl": "https://github.com/nrzz/claude-mcp-check#readme",
+  "supportUrl": "https://github.com/nrzz/claude-mcp-check/issues",
+  "privacyPolicyUrl": "https://github.com/nrzz/claude-mcp-check#privacy",
+  "termsOfServiceUrl": "https://github.com/nrzz/claude-mcp-check/blob/main/LICENSE",
+  "license": "MIT",
+  "keywords": ["mcp", "model-context-protocol", "servers", "configuration", "diagnostics", "context"]
+}
