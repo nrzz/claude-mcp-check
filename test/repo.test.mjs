@@ -252,6 +252,8 @@ const TOOLKIT = [
   "- [claude-relocate](https://github.com/nrzz/claude-relocate): move Claude Code's config folder to another drive or the XDG folders, safely, with undo",
   "- [claude-settings-doctor](https://github.com/nrzz/claude-settings-doctor): a commented settings.jsonc that builds settings.json, the merged settings with their source, a lint against the schema",
   "- [claude-automode-doctor](https://github.com/nrzz/claude-automode-doctor): what auto mode and its classifier decided, from your transcripts, plus a lint of the autoMode settings",
+  "- [claude-sandbox-doctor](https://github.com/nrzz/claude-sandbox-doctor): whether Claude Code's Bash sandbox works on this machine, and why a command ran inside it, outside it, or not at all",
+  "- [claude-windows-doctor](https://github.com/nrzz/claude-windows-doctor): which shell the Bash tool gets on Windows and why, every claude on PATH, and the setup problems behind common Windows issues",
 ];
 
 test("the README has the sections the house keeps, in order, and the Privacy heading the plugin manifest links to", () => {
@@ -283,7 +285,7 @@ test("the README names every command and every option the CLI has, and the insta
   assert.ok(!/\b(simply|easily|blazing|seamless|powerful|amazing)\b/i.test(readme), "plain words");
 });
 
-test("the toolkit list: the fourteen lines, settings-doctor, the sibling, the page line and the star line; this tool is not in its own list", () => {
+test("the toolkit list: the lines of the other tools, the page line and the star line; this tool is not in its own list", () => {
   const readme = read("README.md");
   const section = readme.slice(readme.indexOf("\n## Part of the Claude Code toolkit\n"), readme.indexOf("\n## License\n"));
   const lines = section.split("\n").filter((l) => l.startsWith("- "));
