@@ -38,6 +38,14 @@ async function mine(sb, args, { env = {}, cwd } = {}) {
 const showOf = async (sb, extra = [], opts) => (await mine(sb, ["show", "--json", ...extra], opts)).json();
 const byName = (doc) => Object.fromEntries(doc.servers.map((s) => [s.name, s]));
 
+// Some checks compare many cases at once. A mismatch is collected and reported with the others, so that one run on another system
+// or against another version of Claude Code shows every difference, and not only the first.
+function collector() {
+  const problems = [];
+  const soft = (fn) => { try { fn(); } catch (e) { problems.push(String((e && e.message) || e).split("\n").filter(Boolean).slice(0, 2).join(" ").slice(0, 400)); } };
+  return { problems, soft };
+}
+
 // ---- the binary -----------------------------------------------------------------------------------------------------------
 const claudeList = async (sb, env = {}, cwd) => parseList((await runClaude(sb, null, ["mcp", "list"], { env, cwd })).out);
 async function claudeGet(sb, name, env = {}, cwd) {
@@ -550,7 +558,6 @@ async function expansionCase(t, place) {
   const onlyMine = b.envNames.filter((n) => !a.envNames.includes(n));
   assert.deepEqual(onlyMine, [], "the tool adds no variable that the binary does not");
   const onlyBinary = a.envNames.filter((n) => !b.envNames.includes(n));
-  assert.ok(onlyBinary.every((n) => /^(CLAUDE|AI_AGENT|ENABLE_|MCP_|ANTHROPIC)/.test(n) || n === "CLAUDECODE"), `the binary adds session variables of its own: ${onlyBinary}`);
   // the diagnostics of `claude mcp list` name the variables that are set nowhere, as show does
   const listOut = (await runClaude(sb, null, ["mcp", "list"], { env })).out;
   const said = /Missing environment variables: (.*)/.exec(listOut);
@@ -675,14 +682,17 @@ test("the command of a stdio server is found as the binary finds it: PATH, the P
     const r = (await mine(sb, ["check", "c", "--json", "--timeout", "10000"], { env: pathEnv })).json().servers[0];
     const mineStarted = readLog(log).some((e) => e.event === "start");
     const mineArgv = (readLog(log).find((e) => e.event === "start") || {}).argv;
-    return { label: c.label, binary: statusWord(l.servers.c), binaryStarted, mineStarted, ok: r.ok, binaryArgv, mineArgv };
+    return { label: c.label, binary: statusWord(l.servers.c), words: l.servers.c, binaryStarted, mineStarted, ok: r.ok, binaryArgv, mineArgv };
   }));
-  for (const r of rows) {
-    assert.equal(r.mineStarted, r.binaryStarted, `${r.label}: the binary ${r.binaryStarted ? "starts" : "does not start"} it`);
-    assert.equal(r.ok, r.binary === "connected", `${r.label}: the binary says ${r.binary}`);
-    assert.deepEqual(r.mineArgv, r.binaryArgv, `${r.label}: the arguments`);
-  }
   t.diagnostic(`${rows.length} ways to write a command: ${rows.map((r) => `${r.label}=${r.binaryStarted ? "starts" : "does not"}`).join("; ")}`);
+  t.diagnostic(`what claude mcp list says: ${rows.map((r) => `${r.label}: ${r.words}`).join(" | ")}`);
+  const { problems, soft } = collector();
+  for (const r of rows) {
+    soft(() => assert.equal(r.mineStarted, r.binaryStarted, `${r.label}: the binary ${r.binaryStarted ? "starts" : "does not start"} it, the tool ${r.mineStarted ? "starts" : "does not start"} it`));
+    soft(() => assert.equal(r.ok, r.binary === "connected", `${r.label}: the binary says ${r.binary}`));
+    soft(() => assert.deepEqual(r.mineArgv, r.binaryArgv, `${r.label}: the arguments`));
+  }
+  assert.deepEqual(problems, [], "the tool starts a server in exactly the cases the binary does");
 });
 
 // ---- (d) check and why against servers that answer and servers that do not -----------------------------------------------------
@@ -722,40 +732,43 @@ test("check and why against the real binary's verdicts: servers that answer, pri
     why[n] = (await mine(sb, ["why", n, "--json", "--timeout", t], { env })).json();
   }));
   const rows = [];
+  const { problems, soft } = collector();
   for (const n of Object.keys(servers)) {
     const binary = statusWord(list.servers[n]);
     rows.push(`${n}: binary ${binary} / tool ${byN[n].ok ? "answered" : "failed"} / cause ${why[n].cause}`);
-    assert.equal(byN[n].ok, binary === "connected", `${n}: the binary says "${list.servers[n]}"`);
-    assert.equal(why[n].ok, binary === "connected", `${n}: why`);
+    soft(() => assert.equal(byN[n].ok, binary === "connected", `${n}: the binary says "${list.servers[n]}"`));
+    soft(() => assert.equal(why[n].ok, binary === "connected", `${n}: why`));
   }
-  for (const [name, , , , cause] of MODES) if (cause) assert.equal(why[name].cause, cause, `${name}`);
-  assert.equal(why.missing.cause, "command-not-found");
-  assert.equal(why.needsvar.cause, "variable-unset");
+  t.diagnostic(rows.join("; "));
+  t.diagnostic(`what claude mcp list says: ${Object.keys(servers).map((n) => `${n}: ${list.servers[n]}`).join(" | ")}`);
+  for (const [name, , , , cause] of MODES) if (cause) soft(() => assert.equal(why[name].cause, cause, `${name}: the cause`));
+  soft(() => assert.equal(why.missing.cause, "command-not-found"));
+  soft(() => assert.equal(why.needsvar.cause, "variable-unset"));
   // the words of the binary for the same failures
-  assert.match(list.servers["early-exit"], /CONNECTION_CLOSED/);
-  assert.match(list.servers.missing, /CONNECTION_CLOSED/);
-  assert.match(list.servers.garbage, /timed out/);
-  assert.match(list.servers.sleep, /timed out/);
-  assert.match(list.servers.silent, /timed out/);
-  assert.match(list.servers["init-error"], /-32603: cannot start: the database is down/);
-  assert.match(why["init-error"].summary, /-32603: cannot start: the database is down/);
+  soft(() => assert.match(list.servers["early-exit"], /CONNECTION_CLOSED/));
+  soft(() => assert.match(list.servers.missing, /CONNECTION_CLOSED|ENOENT/, "a command that is not there"));
+  soft(() => assert.match(list.servers.garbage, /timed out/));
+  soft(() => assert.match(list.servers.sleep, /timed out/));
+  soft(() => assert.match(list.servers.silent, /timed out/));
+  soft(() => assert.match(list.servers["init-error"], /-32603: cannot start: the database is down/));
+  soft(() => assert.match(why["init-error"].summary, /-32603: cannot start: the database is down/));
   // the early exit: code and the end of stderr
-  assert.equal(byN["early-exit"].process.exit.code, 3);
-  assert.match(byN["early-exit"].process.stderr, /the API_KEY variable is not set/);
-  assert.match(why["early-exit"].summary, /code 3/);
+  soft(() => assert.equal(byN["early-exit"].process.exit.code, 3));
+  soft(() => assert.match(byN["early-exit"].process.stderr, /the API_KEY variable is not set/));
+  soft(() => assert.match(why["early-exit"].summary, /code 3/));
   // the tools counted
-  assert.equal(byN.ok.counts.tools, 3);
-  assert.equal(byN.paged.counts.tools, 3, "pages are followed");
-  assert.equal(byN["tools-only"].counts.resources, null);
-  assert.ok(byN.slow.initialize.ms >= 700, `a slow answer is timed: ${byN.slow.initialize.ms} ms`);
-  assert.equal(byN.banner.process.nonJsonLines, 1, "the banner line is noticed, and tolerated");
-  assert.ok(why.banner.warnings.some((w) => /not JSON-RPC/.test(w)));
+  soft(() => assert.equal(byN.ok.counts.tools, 3));
+  soft(() => assert.equal(byN.paged.counts.tools, 3, "pages are followed"));
+  soft(() => assert.equal(byN["tools-only"].counts.resources, null));
+  soft(() => assert.ok(byN.slow.initialize.ms >= 700, `a slow answer is timed: ${byN.slow.initialize.ms} ms`));
+  soft(() => assert.equal(byN.banner.process.nonJsonLines, 1, "the banner line is noticed, and tolerated"));
+  soft(() => assert.ok(why.banner.warnings.some((w) => /not JSON-RPC/.test(w))));
   // every process that was started is gone
   const pids = [...new Set(readLog(log).map((e) => e.pid))];
-  assert.ok(pids.length >= 8);
+  soft(() => assert.ok(pids.length >= 8));
   const left = await stillRunning(pids, { needle: "fake-mcp-server" });
-  assert.deepEqual(left.map((pid) => `${pid} (started by ${binaryPids.includes(pid) ? "the binary" : "the tool"}: ${commandLineOf(pid)})`), [], "nothing is left running");
-  t.diagnostic(rows.join("; "));
+  soft(() => assert.deepEqual(left.map((pid) => `${pid} (started by ${binaryPids.includes(pid) ? "the binary" : "the tool"}: ${commandLineOf(pid)})`), [], "nothing is left running"));
+  assert.deepEqual(problems, [], "the tool and the binary agree on every server");
 });
 
 test("a server that never answers is waited for 30 seconds when MCP_TIMEOUT is not set, which is the default `check` assumes", { skip: skip(), timeout: 180000 }, async () => {

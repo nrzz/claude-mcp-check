@@ -37,5 +37,6 @@ jobs:
         env:
           E2E_CLAUDE: claude
       - name: check against a real third-party server (needs the network)
+        if: ${{ !cancelled() }}
         run: node test/everything.mjs run
         continue-on-error: true
