@@ -105,6 +105,40 @@ test("a secret in an argument or a URL is never in a finding", async () => {
   assert.ok(!out.includes("abcdefghijklmnop") && !out.includes("abc123secret"));
 });
 
+test("literal credentials in a shared .mcp.json: warnings emitted and secrets are never in the text, JSON or markdown report", async () => {
+  const w = world("lint-literal-cred");
+  w.mcpJson({
+    mcpServers: {
+      search: {
+        command: "npx",
+        args: ["-y", "search-mcp", "--api-key", "sk-live-0123456789abcdef"],
+        env: { SEARCH_TOKEN: "0123456789abcdef0123" },
+      },
+      github: {
+        type: "http",
+        url: "https://api.githubcopilot.com/mcp/",
+        headers: { Authorization: "Bearer ghp_0123456789abcdefghijklmnopqrstuv" },
+      },
+    },
+  });
+  w.local({ enabledMcpjsonServers: ["search", "github"] });
+  const doc = await lint(w);
+  const credFindings = doc.findings.filter((f) => f.id === "literal-credential");
+  assert.equal(credFindings.length, 3);
+  const fields = credFindings.map((f) => f.message).join(" ");
+  assert.match(fields, /args\[3\]/);
+  assert.match(fields, /env\.SEARCH_TOKEN/);
+  assert.match(fields, /headers\.Authorization/);
+
+  const text = (await run(["lint"], w)).out;
+  const md = (await run(["lint", "--markdown"], w)).out;
+  const allOut = JSON.stringify(doc) + text + md;
+
+  assert.ok(!allOut.includes("0123456789abcdef"));
+  assert.ok(!allOut.includes("0123456789abcdef0123"));
+  assert.ok(!allOut.includes("ghp_0123456789abcdefghijklmnopqrstuv"));
+});
+
 test("a command written as a whole command line: Claude Code does not split it on Linux and macOS, and lint and why say so", async () => {
   const w = world("lint7");
   w.claudeJson({ mcpServers: { s: { command: "definitely-not-installed-xyz -y some-server" } } });

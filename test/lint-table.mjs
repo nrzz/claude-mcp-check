@@ -133,6 +133,63 @@ export const ROWS = [
     setup: (s) => s.claudeJson({ mcpServers: { c: { command: "${LINT_ROW_BIN}", args: ["x"] } } }),
     expect: ["command-not-found", "variable-unset"],
   },
+  {
+    name: "a literal credential in a shared .mcp.json",
+    setup: (s) => {
+      s.mcpJson({
+        mcpServers: {
+          search: {
+            command: "npx",
+            args: ["-y", "search-mcp", "--api-key", "sk-live-0123456789abcdef"],
+            env: { SEARCH_TOKEN: "0123456789abcdef0123" },
+          },
+          github: {
+            type: "http",
+            url: "https://api.githubcopilot.com/mcp/",
+            headers: { Authorization: "Bearer ghp_0123456789abcdefghijklmnopqrstuv" },
+          },
+        },
+      });
+      s.local({ enabledMcpjsonServers: ["search", "github"] });
+    },
+    expect: ["literal-credential", "literal-credential", "literal-credential"],
+    severity: { "literal-credential": "warning" },
+  },
+  {
+    name: "a ${VAR} reference in a shared .mcp.json is not a literal credential",
+    setup: (s) => {
+      s.mcpJson({
+        mcpServers: {
+          search: {
+            command: "npx",
+            args: ["-y", "search-mcp", "--api-key", "${SEARCH_API_KEY}"],
+            env: { SEARCH_TOKEN: "${SEARCH_TOKEN}" },
+          },
+          github: {
+            type: "http",
+            url: "https://api.githubcopilot.com/mcp/",
+            headers: { Authorization: "Bearer ${GITHUB_TOKEN}" },
+          },
+        },
+      });
+      s.local({ enabledMcpjsonServers: ["search", "github"] });
+      s.user({ env: { SEARCH_API_KEY: "x", SEARCH_TOKEN: "y", GITHUB_TOKEN: "z" } });
+    },
+    expect: [],
+  },
+  {
+    name: "a credential in ~/.claude.json is private and not a finding",
+    setup: (s) => s.claudeJson({
+      mcpServers: {
+        search: {
+          command: "npx",
+          args: ["-y", "search-mcp", "--api-key", "sk-live-0123456789abcdef"],
+          env: { SEARCH_TOKEN: "0123456789abcdef0123" },
+        },
+      },
+    }),
+    expect: [],
+  },
 ];
 
 export const worldUnder = (base) => path.join(base, "work");
