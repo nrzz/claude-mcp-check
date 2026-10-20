@@ -2,6 +2,10 @@
 
 All notable changes to claude-mcp-check are written here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+- `lint`: `literal-credential` finding for a `.mcp.json` that holds a credential written out instead of a `${VAR}` reference.
+
 ## [1.0.0] - 2026-10-16
 
 - First release. A CLI and a Claude Code plugin with one user-only skill, `/mcp-check:check`.

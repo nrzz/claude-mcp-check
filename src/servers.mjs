@@ -23,9 +23,15 @@ export function locator(file) {
   return (keys) => {
     if (doc === undefined) doc = file.text ? parseDoc(file.text) : { ok: false };
     if (!doc.ok) return null;
-    const node = nodeAt(doc.root, keys.slice(0, -1));
-    if (!node || node.type !== "object") return null;
-    const m = node.members.filter((x) => x.key === keys[keys.length - 1]).pop();
+    const parent = nodeAt(doc.root, keys.slice(0, -1));
+    if (!parent) return null;
+    const last = keys[keys.length - 1];
+    if (typeof last === "number" && parent.type === "array") {
+      const item = parent.items[last];
+      return item ? positionAt(file.text, item.start).line : null;
+    }
+    if (parent.type !== "object") return null;
+    const m = parent.members.filter((x) => x.key === last).pop();
     return m ? positionAt(file.text, m.start).line : null;
   };
 }

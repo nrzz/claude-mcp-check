@@ -2,7 +2,7 @@
 import "./helpers.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { hideDefaults, MASK, redactArgs, redactCommand, redactText, redactUrl } from "../src/redact.mjs";
+import { hideDefaults, looksLikeCredential, MASK, redactArgs, redactCommand, redactText, redactUrl } from "../src/redact.mjs";
 
 test("the value of a flag that names a secret is hidden, in both spellings", () => {
   assert.deepEqual(redactArgs(["--api-key", "abc123", "--port", "8080", "--token=xyz", "--password", "hunter2"]), ["--api-key", MASK, "--port", "8080", `--token=${MASK}`, "--password", MASK]);
@@ -46,4 +46,18 @@ test("free text: bearer tokens, key shapes and token=value", () => {
   assert.equal(redactText("token=abcdef123456 region=eu"), `token=${MASK} region=eu`);
   assert.ok(!redactText("failed with sk-ant-api03-abcdefghijklmnop at 12:00").includes("abcdefghijklmnop"));
   assert.equal(redactText("nothing secret here"), "nothing secret here");
+});
+
+test("looksLikeCredential matches secret names, key shapes, and ignores references and empty values", () => {
+  assert.equal(looksLikeCredential("Authorization", "Bearer ghp_0123456789abcdefghijklmnopqrstuv"), true);
+  assert.equal(looksLikeCredential("Authorization", "Bearer ${TOKEN}"), false);
+  assert.equal(looksLikeCredential("SEARCH_TOKEN", "0123456789abcdef0123"), true);
+  assert.equal(looksLikeCredential("SEARCH_TOKEN", "${SEARCH_TOKEN}"), false);
+  assert.equal(looksLikeCredential("SEARCH_TOKEN", "${SEARCH_TOKEN:-default}"), false);
+  assert.equal(looksLikeCredential("--api-key", "sk-live-0123456789abcdef"), true);
+  assert.equal(looksLikeCredential(null, "sk-ant-api03-abcdefghijklmnop"), true);
+  assert.equal(looksLikeCredential(null, "plain-word"), false);
+  assert.equal(looksLikeCredential("api_key", ""), false);
+  assert.equal(looksLikeCredential("api_key", null), false);
+  assert.equal(looksLikeCredential("HOST", "localhost"), false);
 });
