@@ -3,8 +3,8 @@
 // KEY=value whose name says token, key, secret, password or auth; the password of a URL; a query value of such a name; and
 // text of the shape of an API key. A ${VAR} reference is a name and is shown (its default, which may be a literal, is not).
 
-const SECRET_NAME = /(token|secret|passw(or)?d|passwd|pwd|credential|bearer|cookie|authorization|auth(?![a-z])|key$|sig(nature)?$)/i;
-const KEY_SHAPE = /^(sk-[A-Za-z0-9_-]{16,}|sk_(live|test)_[A-Za-z0-9]{10,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|xox[abprs]-[\w-]{10,}|AKIA[0-9A-Z]{16}|AIza[\w-]{30,}|eyJ[\w-]{10,}\.[\w-]{10,}\.[\w-]*|glpat-[\w-]{15,}|npm_[A-Za-z0-9]{30,})$/;
+export const SECRET_NAME = /(token|secret|passw(or)?d|passwd|pwd|credential|bearer|cookie|authorization|auth(?![a-z])|key$|sig(nature)?$)/i;
+export const KEY_SHAPE = /^(sk-[A-Za-z0-9_-]{16,}|sk_(live|test)_[A-Za-z0-9]{10,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|xox[abprs]-[\w-]{10,}|AKIA[0-9A-Z]{16}|AIza[\w-]{30,}|eyJ[\w-]{10,}\.[\w-]{10,}\.[\w-]*|glpat-[\w-]{15,}|npm_[A-Za-z0-9]{30,})$/;
 const REFERENCE = /\$\{([A-Za-z_][A-Za-z0-9_]*)(:-[^}]*)?\}/g;
 export const MASK = "***";
 
@@ -14,15 +14,25 @@ export function hideDefaults(text) {
 }
 
 const isReference = (v) => /^\$\{[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\}$/.test(v);
-const maskValue = (v) => (v === "" || isReference(v) ? hideDefaults(v) : MASK);
+
+/** Says whether a (name, value) pair looks like a credential. A ${VAR} reference is never a credential. */
+export function looksLikeCredential(name, value) {
+  if (value === undefined || value === null) return false;
+  const s = String(value);
+  if (s === "") return false;
+  if (/\$\{([A-Za-z_][A-Za-z0-9_]*)(:-[^}]*)?\}/.test(s)) return false;
+  if (name && SECRET_NAME.test(String(name))) return true;
+  const bare = s.replace(/^(Bearer|Basic)\s+/i, "");
+  return KEY_SHAPE.test(bare);
+}
 
 /** A URL with the password, the user name of a "user:password@" part and the secret-looking query values masked. */
 export function redactUrl(text) {
   let out = String(text);
   // user:password@host
-  out = out.replace(/^([a-z][a-z0-9+.-]*:\/\/)([^/@\s?#]*)@/i, (m, scheme, userinfo) => (userinfo.includes(":") ? `${scheme}${userinfo.split(":")[0]}:${MASK}@` : `${scheme}${isReference(userinfo) ? userinfo : MASK}@`));
+  out = out.replace(/^([a-z][a-z0-9+.-]*:\/\/)([^/@\s?#]*)@/i, (m, scheme, userinfo) => (userinfo.includes(":") ? `${scheme}${userinfo.split(":")[0]}:${looksLikeCredential("password", userinfo.slice(userinfo.indexOf(":") + 1)) ? MASK : hideDefaults(userinfo.slice(userinfo.indexOf(":") + 1))}@` : `${scheme}${isReference(userinfo) ? userinfo : MASK}@`));
   // ?a=b&token=c
-  out = out.replace(/([?&])([^=&#]+)=([^&#]*)/g, (m, sep, key, value) => (SECRET_NAME.test(key) || KEY_SHAPE.test(value) ? `${sep}${key}=${maskValue(value)}` : `${sep}${key}=${hideDefaults(value)}`));
+  out = out.replace(/([?&])([^=&#]+)=([^&#]*)/g, (m, sep, key, value) => (looksLikeCredential(key, value) ? `${sep}${key}=${MASK}` : `${sep}${key}=${hideDefaults(value)}`));
   return hideDefaults(out);
 }
 
@@ -30,16 +40,23 @@ export function redactUrl(text) {
 export function redactArgs(args) {
   const out = [];
   let hideNext = false;
+  let prevFlag = null;
   for (const raw of args || []) {
     const a = String(raw);
-    if (hideNext && !a.startsWith("-")) { out.push(maskValue(a)); hideNext = false; continue; }
+    if (hideNext && !a.startsWith("-")) {
+      out.push(looksLikeCredential(prevFlag, a) ? MASK : hideDefaults(a));
+      hideNext = false;
+      prevFlag = null;
+      continue;
+    }
     hideNext = false;
+    prevFlag = null;
     const flag = /^(--?[A-Za-z0-9_.-]+)=(.*)$/s.exec(a);
-    if (flag && (SECRET_NAME.test(flag[1]) || KEY_SHAPE.test(flag[2]))) { out.push(`${flag[1]}=${maskValue(flag[2])}`); continue; }
+    if (flag && looksLikeCredential(flag[1], flag[2])) { out.push(`${flag[1]}=${MASK}`); continue; }
     const pair = /^([A-Za-z_][A-Za-z0-9_.]*)=(.*)$/s.exec(a);
-    if (pair && (SECRET_NAME.test(pair[1]) || KEY_SHAPE.test(pair[2]))) { out.push(`${pair[1]}=${maskValue(pair[2])}`); continue; }
-    if (/^--?[A-Za-z0-9_.-]+$/.test(a) && SECRET_NAME.test(a)) { out.push(a); hideNext = true; continue; }
-    if (KEY_SHAPE.test(a)) { out.push(MASK); continue; }
+    if (pair && looksLikeCredential(pair[1], pair[2])) { out.push(`${pair[1]}=${MASK}`); continue; }
+    if (/^--?[A-Za-z0-9_.-]+$/.test(a) && SECRET_NAME.test(a)) { out.push(a); hideNext = true; prevFlag = a; continue; }
+    if (looksLikeCredential(null, a)) { out.push(MASK); continue; }
     if (/^[a-z][a-z0-9+.-]*:\/\//i.test(a)) { out.push(redactUrl(a)); continue; }
     out.push(hideDefaults(a));
   }
