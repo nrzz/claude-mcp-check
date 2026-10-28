@@ -13,6 +13,7 @@ async function serve(handler) {
   const seen = [];
   const server = http.createServer((req, res) => {
     let body = "";
+    req.setEncoding("utf8");
     req.on("data", (c) => { body += c; });
     req.on("end", () => {
       let m = null;

@@ -146,6 +146,7 @@ export function fakeApi(call, { refuseDeferred = false } = {}) {
   const requests = [];
   const server = http.createServer((req, res) => {
     let body = "";
+    req.setEncoding("utf8");
     req.on("data", (c) => { body += c; });
     req.on("end", () => {
       if (!req.url.includes("/v1/messages")) { res.writeHead(404); res.end("{}"); return; }

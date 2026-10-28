@@ -722,6 +722,7 @@ test("in the url and headers of a remote server some credential names read as em
   const seen = [];
   const server = http.createServer((req, res) => {
     let body = "";
+    req.setEncoding("utf8");
     req.on("data", (c) => { body += c; });
     req.on("end", () => {
       let m = null;
@@ -764,6 +765,7 @@ test("which variable names read as empty in the headers of a remote server: the 
   const seen = [];
   const server = http.createServer((req, res) => {
     let body = "";
+    req.setEncoding("utf8");
     req.on("data", (c) => { body += c; });
     req.on("end", () => { let m = null; try { m = JSON.parse(body); } catch { /* none */ } if (m && m.method === "initialize") seen.push(req.headers); res.writeHead(404); res.end(); });
   });
@@ -962,6 +964,7 @@ test("remote servers: `check` and `claude mcp list` agree on what answers, what 
   const result = (m) => (m.method === "initialize" ? { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "http-fake", version: "1" } } : m.method === "tools/list" ? { tools: TOOLS } : {});
   const server = http.createServer((req, res) => {
     let body = "";
+    req.setEncoding("utf8");
     req.on("data", (c) => { body += c; });
     req.on("end", () => {
       let m = null;
