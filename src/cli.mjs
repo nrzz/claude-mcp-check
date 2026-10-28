@@ -19,7 +19,7 @@ Read (they change nothing):
            every MCP server Claude Code would load for the project: the file and the key each
            definition is in, scope, transport, command or URL, the approval of .mcp.json servers
            (approved, pending, rejected), whether the project switched it off or a policy blocks it,
-           and which definition wins when a name is defined twice
+           which definition wins when a name is defined twice, and whether tool search is on
   lint     [--project <dir>] [--mcp-config <file>]... [--markdown]
            a name defined in two scopes, a command that is not on the PATH, a \${VAR} that is set
            nowhere, a .mcp.json server nobody approved, a server both enabled and disabled, a list
@@ -34,7 +34,8 @@ Start servers (they run the commands you configured, and connect to the URLs you
            start each stdio server with the command, arguments, environment and folder Claude Code
            would use, perform the MCP handshake, list its tools, resources and prompts, time the
            answer to initialize and size the tool schemas (characters, and characters / 4 as a token
-           estimate); probe an HTTP or SSE URL and say from the status code whether it wants a login.
+           estimate) and the list of names that tool search carries instead; say which of the two
+           the request holds; probe an HTTP or SSE URL and say from the status code whether it wants a login.
            A .mcp.json server nobody approved is not started unless --include-unapproved. Every
            child is ended before the command returns. Exit 1 when a server did not answer
   why      <name> [same options as check]
@@ -61,8 +62,11 @@ Options for every command:
 
 Exit codes: 0 ok; 1 findings, a failed server or a refusal; 2 a usage error or an unexpected error.
 Environment: CLAUDE_CONFIG_DIR (Claude's config folder), MCP_TIMEOUT (the default of --timeout),
-and CLAUDE_MCP_CHECK_MANAGED_DIR (the folder to read managed-mcp.json and managed-settings.json from,
-instead of the system folder; the tests use it).
+ENABLE_TOOL_SEARCH, CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS and ANTHROPIC_BASE_URL (read as Claude Code
+reads them, with the env of the settings files over them, to say whether tool search is on; only the
+host of the URL is ever shown), AI_AGENT (set by Claude Code, it names the version when this runs inside
+it), and CLAUDE_MCP_CHECK_MANAGED_DIR (the folder to read managed-mcp.json and managed-settings.json
+from, instead of the system folder; the tests use it).
 It reads configuration files. Only check and why start programs or open connections, and only the
 servers and URLs you configured. It writes only with toggle and restore, and it sends nothing to
 Anthropic or anyone else.

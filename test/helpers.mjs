@@ -31,7 +31,7 @@ process.env.USERPROFILE = guard;
 process.env.CLAUDE_CONFIG_DIR = path.join(guard, ".claude");
 process.env.CLAUDE_MCP_CHECK_MANAGED_DIR = path.join(guard, "no-managed-settings");
 process.env.NO_COLOR = "1";
-for (const k of Object.keys(process.env)) if (/^(CLAUDE_CODE_|ANTHROPIC_|MCP_|ENABLE_TOOL_SEARCH)/.test(k)) delete process.env[k];
+for (const k of Object.keys(process.env)) if (/^(CLAUDE_CODE_|ANTHROPIC_|MCP_|ENABLE_TOOL_SEARCH|AI_AGENT$)/.test(k)) delete process.env[k];
 delete process.env.CLAUDE_PROJECT_DIR;
 delete process.env.CLAUDECODE;
 

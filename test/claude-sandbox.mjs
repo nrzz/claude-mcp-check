@@ -139,9 +139,10 @@ export const textBlocks = (request) => (request.messages || []).flatMap((m) => (
 /**
  * The fake Messages API. Every request is recorded in `requests`, whole. A request is answered with the text
  * "PROBE-DONE", or, for the first request of the main conversation (its prompt holds PROBE-MAIN), with the one
- * tool call `call` when one is given.
+ * tool call `call` when one is given. With `refuseDeferred` a request that carries deferred tools (a tool with
+ * defer_loading) is answered with HTTP 400, as an endpoint that does not know tool search would answer it.
  */
-export function fakeApi(call) {
+export function fakeApi(call, { refuseDeferred = false } = {}) {
   const requests = [];
   const server = http.createServer((req, res) => {
     let body = "";
@@ -152,6 +153,11 @@ export function fakeApi(call) {
       try { j = JSON.parse(body); } catch { /* empty */ }
       requests.push(j);
       const n = requests.length;
+      if (refuseDeferred && body.includes('"defer_loading"')) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "tools.13.defer_loading: Extra inputs are not permitted" } }));
+        return;
+      }
       if (j.stream === false) {
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ id: `msg_${n}`, type: "message", role: "assistant", model: j.model || "x", content: [{ type: "text", text: "done" }], stop_reason: "end_turn", usage: USAGE }));
@@ -216,12 +222,47 @@ export function initServers(r) {
   return null;
 }
 
-/** One `claude -p` run with the fake API: { api, r, request, init }. The api is closed. */
-export async function probeRun(sb, { prompt = "PROBE-MAIN hello", args = [], env = {} } = {}) {
-  const api = await fakeApi();
+/**
+ * One `claude -p` run with the fake API: { api, r, request, init }. The api is closed.
+ * ENABLE_TOOL_SEARCH is false unless the run says otherwise. From Claude Code 2.1.304 the fake API's host gets tool search by
+ * default (older versions leave it off for a host that is not Anthropic's), and then the first request carries no MCP schema at
+ * all; most checks read the schemas out of the request, so they ask for the shape that every version shares. The checks about
+ * tool search itself pass their own value (or null, to leave the variable unset).
+ */
+export async function probeRun(sb, { prompt = "PROBE-MAIN hello", args = [], env = {}, api: given } = {}) {
+  const api = given || (await fakeApi());
   try {
-    const r = await runClaude(sb, api, ["-p", prompt, "--output-format", "stream-json", "--verbose", ...args], { env });
+    const r = await runClaude(sb, api, ["-p", prompt, "--output-format", "stream-json", "--verbose", ...args], { env: { ENABLE_TOOL_SEARCH: "false", ...env, ...(env.ENABLE_TOOL_SEARCH === null ? { ENABLE_TOOL_SEARCH: undefined } : {}) } });
     return { api, r, request: mainRequest(api), init: initServers(r) };
+  } finally { if (!given) await api.close(); }
+}
+
+/**
+ * The names that the first request announces as deferred, in the message that begins "The following deferred tools are now
+ * available via ToolSearch" (one name to a line, the built-in tools first and the MCP tools after them): [] when there is none.
+ */
+export function deferredNames(request) {
+  for (const text of textBlocks(request)) {
+    const lines = text.split("\n");
+    const at = lines.findIndex((l) => l.includes("deferred tools are now available via ToolSearch"));
+    if (at < 0) continue;
+    const names = [];
+    for (const l of lines.slice(at + 1)) { if (!/^[A-Za-z][A-Za-z0-9_:.-]*$/.test(l)) break; names.push(l); }
+    return names;
+  }
+  return [];
+}
+
+/**
+ * A run in which the model's first act is to call ToolSearch with `query`: { api, r, first, second }, the first request of the
+ * conversation and the one that follows the tool's answer. The api is closed.
+ */
+export async function toolSearchRun(sb, query, { env = {}, args = [] } = {}) {
+  const api = await fakeApi({ tool: "ToolSearch", input: { query, max_results: 10 } });
+  try {
+    const r = await runClaude(sb, api, ["-p", "PROBE-MAIN hello", "--output-format", "stream-json", "--verbose", ...args], { env: { ENABLE_TOOL_SEARCH: "true", ...env } });
+    const main = api.requests.filter((j) => userText(j).includes("PROBE-MAIN"));
+    return { api, r, first: main[0], second: main[1] };
   } finally { await api.close(); }
 }
 

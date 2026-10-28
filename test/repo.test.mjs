@@ -195,7 +195,7 @@ test("the licence, the conduct file, the changelog and the version agree", () =>
   assert.match(read("LICENSE"), /^MIT License/);
   assert.match(read("LICENSE"), /Copyright \(c\) 2026 Naresh Prabu/);
   assert.ok(exists("CODE_OF_CONDUCT.md"));
-  assert.match(read("CHANGELOG.md"), new RegExp(`^## \\[${VERSION.replace(/\./g, "\\.")}\\] - 2026-10-16$`, "m"));
+  assert.match(read("CHANGELOG.md"), new RegExp(`^## \\[${VERSION.replace(/\./g, "\\.")}\\] - 2026-10-28$`, "m"));
   assert.match(read("CHANGELOG.md"), new RegExp(`^\\[${VERSION.replace(/\./g, "\\.")}\\]: https://github\\.com/nrzz/claude-mcp-check/releases/tag/v${VERSION.replace(/\./g, "\\.")}$`, "m"));
   for (const f of ["SECURITY.md", "SUPPORT.md", "ROADMAP.md", "CONTRIBUTING.md"]) assert.ok(exists(f), f);
   assert.match(read("SECURITY.md"), /security\/advisories\/new/);

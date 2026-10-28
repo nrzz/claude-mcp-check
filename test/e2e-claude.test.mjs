@@ -15,10 +15,11 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { ROOT, SERVER, commandLineOf, fake, fwd, readLog, stillRunning } from "./helpers.mjs";
-import { CLAUDE, atLeast, baseEnv, claudeInfo, fakeApi, initServers, mainRequest, mcpTools, parseList, patchClaudeJson, probeRun, put, runClaude, sandbox, skip, statusWord, textBlocks, toolNames } from "./claude-sandbox.mjs";
+import { CLAUDE, atLeast, baseEnv, claudeInfo, deferredNames, fakeApi, initServers, mainRequest, mcpTools, parseList, patchClaudeJson, probeRun, put, runClaude, sandbox, skip, statusWord, textBlocks, toolNames, toolSearchRun, userText, versionNumbers } from "./claude-sandbox.mjs";
 import { main } from "../src/cli.mjs";
 import { REMOTE_EMPTY, expandString, expansionEnv } from "../src/expand.mjs";
-import { measureTools } from "../src/measure.mjs";
+import { RESOURCE_TOOLS, measureTools } from "../src/measure.mjs";
+import { claudeVersionOf } from "../src/toolsearch.mjs";
 import { ROWS as VALIDATION_ROWS } from "./validation-table.mjs";
 import { ROWS as LINT_ROWS } from "./lint-table.mjs";
 
@@ -74,7 +75,7 @@ test("claude plugin validate accepts the plugin, also with --strict", { skip: sk
 
 // ---- (a) what the model receives, and what the tool measures ----------------------------------------------------------------
 
-test("a user-scope server: its tools are the first request's tools, named mcp__<server>__<tool>; `show` and `check` say what the request carries", { skip: skip(), timeout: 180000 }, async (t) => {
+test("a user-scope server, tool search off: its tools are the first request's tools, named mcp__<server>__<tool>; `show` and `check` say what the request carries", { skip: skip(), timeout: 180000 }, async (t) => {
   const sb = sandbox("user");
   patchClaudeJson(sb, { mcpServers: { fake: echoOk("user") } });
   const { request, init } = await probeRun(sb);
@@ -139,10 +140,14 @@ test("a server that offers resources makes Claude Code send three tools of its o
   const said = (await mine(withResources.sb, ["check", "--json", "--timeout", "10000"])).json();
   assert.deepEqual(said.resourceTools.names, withResources.extra.map((x) => x.name).sort());
   assert.equal(said.totals.serversOfferingResources, 1);
-  if (claudeInfo().version.startsWith("2.1.299")) assert.equal(withResources.chars, said.resourceTools.chars, "the figure of the report is the one measured on 2.1.299");
-  const text = (await mine(withResources.sb, ["check", "--timeout", "10000"])).out;
+  // the figure of the report is the one measured on 2.1.299, and the same on every version since that was looked at
+  if (/^2\.1\.(299|30\d|31\d)/.test(claudeInfo().version)) assert.equal(withResources.chars, said.resourceTools.chars, "the figure of the report is the one measured on 2.1.299");
+  const upFront = { env: { ENABLE_TOOL_SEARCH: "false" } };
+  const text = (await mine(withResources.sb, ["check", "--timeout", "10000"], upFront)).out;
   assert.match(text, /A server that offers resources also makes Claude Code send 3 tools of its own/);
-  assert.doesNotMatch((await mine(toolsOnly.sb, ["check", "--timeout", "10000"])).out, /offers resources also makes/);
+  assert.doesNotMatch((await mine(toolsOnly.sb, ["check", "--timeout", "10000"], upFront)).out, /offers resources also (makes|adds)/);
+  // with tool search on (the default) they are three names in a list, and the report says so
+  assert.match((await mine(withResources.sb, ["check", "--timeout", "10000"])).out, /A server that offers resources also adds 3 tool names to the list/);
   t.diagnostic(`the three resource tools are ${withResources.chars} characters on Claude Code ${claudeInfo().version}`);
 });
 
@@ -159,25 +164,157 @@ test("tools whose full name is over 128 characters are left out, as `check` says
   assert.equal(c.cost.toolsSent, 5);
 });
 
-test("with tool search on, the request carries no MCP schema: the sizes `check` reports are what loads up front", { skip: skip(), timeout: 180000 }, async (t) => {
-  const sb = sandbox("toolsearch");
-  patchClaudeJson(sb, { mcpServers: { fake: fake("ok") } });
-  const off = await probeRun(sb);
+// ---- tool search: whether the request carries the schemas or the names ------------------------------------------------------------
+// Every check above reads the schemas out of the request, so probeRun asks for them (ENABLE_TOOL_SEARCH=false, which every version
+// honours). These are the checks about tool search itself: what decides it, what the request carries when it is on, what the
+// model's next request carries once a tool is loaded, and that `show` and `check` say what the binary did.
+
+const withServers = (label, servers = { fake: fake("ok") }) => { const sb = sandbox(label); patchClaudeJson(sb, { mcpServers: servers }); return sb; };
+/** Has the request no MCP schema, with the ToolSearch tool in its place? */
+const deferred = (request) => mcpTools(request).length === 0 && toolNames(request).includes("ToolSearch");
+const agentOf = () => `claude-code_${versionNumbers().join("-")}_agent`;
+const versionText = () => versionNumbers().join(".");
+/** The in-process tool's verdict on tool search for a world and an environment: show reads it from the files and the environment alone. */
+const verdict = async (sb, env = {}) => (await showOf(sb, [], { env })).toolSearch;
+
+test("tool search by default: Claude Code 2.1.304 and newer defer the MCP tools for the fake API's host too, older ones leave it off there; ENABLE_TOOL_SEARCH=true and =false decide on every version; `show` and `check` say the same", { skip: skip(), timeout: 300000 }, async (t) => {
+  const runs = Object.fromEntries(await Promise.all([["default", null], ["true", "true"], ["false", "false"]].map(async ([label, value]) => [label, await probeRun(withServers(`ts-${label}`), { env: { ENABLE_TOOL_SEARCH: value } })])));
+  assert.ok(deferred(runs.true.request), "ENABLE_TOOL_SEARCH=true defers every MCP tool, on every version");
+  assert.ok(!deferred(runs.false.request) && mcpTools(runs.false.request).length === 3, "ENABLE_TOOL_SEARCH=false puts the three schemas in the request, on every version");
+  assert.equal(deferred(runs.default.request), atLeast(2, 1, 304), "not set: deferred from 2.1.304; before it Claude Code did not defer for a host that is not Anthropic's");
+  assert.equal(mcpTools(runs.default.request).length, atLeast(2, 1, 304) ? 0 : 3);
+  // what the tool says, for a world whose base URL is that of the fake API (a host that is not Anthropic's) and whose version is the binary's
+  const sb = withServers("ts-verdict");
+  const host = { ANTHROPIC_BASE_URL: "http://127.0.0.1:1" };
+  assert.equal((await verdict(sb, { ...host, AI_AGENT: agentOf() })).mode, deferred(runs.default.request) ? "deferred" : "upfront", "the default, for the version of the binary");
+  assert.equal((await verdict(sb, { ...host, AI_AGENT: agentOf(), ENABLE_TOOL_SEARCH: "true" })).mode, "deferred");
+  assert.equal((await verdict(sb, { ...host, AI_AGENT: agentOf(), ENABLE_TOOL_SEARCH: "false" })).mode, "upfront");
+  assert.equal((await verdict(sb, host)).mode, "depends", "without the version it cannot say");
+  const c = (await mine(sb, ["check", "--json", "--timeout", "20000"], { env: { ...host, AI_AGENT: agentOf() } })).json();
+  assert.equal(c.toolSearch.version, versionText());
+  assert.equal(c.totals.carriedChars, deferred(runs.default.request) ? c.totals.nameChars : c.totals.toolSchemaChars);
+  t.diagnostic(`Claude Code ${versionText()}: not set -> ${deferred(runs.default.request) ? "deferred" : "schemas in the request"} (${runs.default.request.tools.length} tools in the request); true -> ${runs.true.request.tools.length}; false -> ${runs.false.request.tools.length}`);
+});
+
+test("Claude Code puts its own version in AI_AGENT for what it starts (claude-code_2-1-309_agent), and the tool reads the version from it", { skip: skip(), timeout: 180000 }, async () => {
+  const sb = withServers("ts-agent", { fake: fake("ok", { env: { FMCP_ECHO: "AI_AGENT" } }) });
+  const { request } = await probeRun(sb);
+  const seen = JSON.parse(mcpTools(request).find((x) => x.name === "mcp__fake__whoami").description.slice("seen: ".length));
+  assert.match(seen.env.AI_AGENT, /^claude-code_\d+-\d+-\d+_\w+$/);
+  assert.equal(claudeVersionOf({ AI_AGENT: seen.env.AI_AGENT }).text, versionText(), "the version in AI_AGENT is the version the binary prints");
+});
+
+// [label, environment given to the binary, settings files' env blocks]: what is observed is compared with what the tool says
+const TOOL_SEARCH_ROWS = [
+  ["true", { ENABLE_TOOL_SEARCH: "true" }], ["TRUE", { ENABLE_TOOL_SEARCH: "TRUE" }], ["1", { ENABLE_TOOL_SEARCH: "1" }], ["yes", { ENABLE_TOOL_SEARCH: "yes" }], ["on", { ENABLE_TOOL_SEARCH: "on" }],
+  ["force", { ENABLE_TOOL_SEARCH: "force" }], ["any other text", { ENABLE_TOOL_SEARCH: "banana" }],
+  ["false", { ENABLE_TOOL_SEARCH: "false" }], ["False", { ENABLE_TOOL_SEARCH: "False" }], ["0", { ENABLE_TOOL_SEARCH: "0" }], ["no", { ENABLE_TOOL_SEARCH: "no" }], ["off", { ENABLE_TOOL_SEARCH: "off" }],
+  ["auto", { ENABLE_TOOL_SEARCH: "auto" }], ["auto:5", { ENABLE_TOOL_SEARCH: "auto:5" }], ["auto:x", { ENABLE_TOOL_SEARCH: "auto:x" }], ["auto:0", { ENABLE_TOOL_SEARCH: "auto:0" }], ["auto:100", { ENABLE_TOOL_SEARCH: "auto:100" }],
+  ["auto:150", { ENABLE_TOOL_SEARCH: "auto:150" }], ["auto:-5", { ENABLE_TOOL_SEARCH: "auto:-5" }], ["auto:20.5", { ENABLE_TOOL_SEARCH: "auto:20.5" }], ["auto: 20", { ENABLE_TOOL_SEARCH: "auto: 20" }],
+  ["Auto", { ENABLE_TOOL_SEARCH: "Auto" }], ["AUTO:20", { ENABLE_TOOL_SEARCH: "AUTO:20" }], [" auto", { ENABLE_TOOL_SEARCH: " auto" }], ["spaces around false", { ENABLE_TOOL_SEARCH: " false " }], ["FALSE", { ENABLE_TOOL_SEARCH: "FALSE" }], ["Off", { ENABLE_TOOL_SEARCH: "Off" }],
+  ["experimental betas off", { CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: "1" }],
+  ["experimental betas off, tool search on", { CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: "1", ENABLE_TOOL_SEARCH: "true" }],
+  ["experimental betas off, tool search forced", { CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: "1", ENABLE_TOOL_SEARCH: "force" }],
+  ["settings (user) false", {}, { user: "false" }],
+  ["settings (user) true, environment false", { ENABLE_TOOL_SEARCH: "false" }, { user: "true" }],
+  ["settings (user) false, environment true", { ENABLE_TOOL_SEARCH: "true" }, { user: "false" }],
+  ["settings (project) false", {}, { project: "false" }],
+  ["settings (local) false", {}, { local: "false" }],
+  ["settings (project) false, (local) true", {}, { project: "false", local: "true" }],
+  ["settings (user) true, (project) false", {}, { user: "true", project: "false" }],
+  ["settings (local) auto", {}, { local: "auto" }],
+];
+
+test("which values of ENABLE_TOOL_SEARCH, in which place, defer the MCP tools: the binary and the tool agree on every row (a server far under any threshold stays in the request for auto)", { skip: skip(), timeout: 600000 }, async (t) => {
+  const { problems, soft } = collector();
+  const outcomes = [];
+  let next = 0;
+  await Promise.all(Array.from({ length: 6 }, async () => {
+    while (next < TOOL_SEARCH_ROWS.length) {
+      const [label, env, files = {}] = TOOL_SEARCH_ROWS[next++];
+      const sb = withServers("ts-row");
+      for (const [scope, value] of Object.entries(files)) put(sb[scope], { env: { ENABLE_TOOL_SEARCH: value } });
+      const { request } = await probeRun(sb, { env: { ENABLE_TOOL_SEARCH: null, ...env } });
+      const said = await verdict(sb, env);
+      const observed = deferred(request) ? "deferred" : "upfront";
+      soft(() => assert.equal(said.mode === "auto" ? "upfront" : said.mode, observed, `${label}: the tool says ${said.mode} (${said.reason}), the binary sent ${request.tools.length} tools, ${mcpTools(request).length} of them MCP`));
+      outcomes.push(`${label}: ${observed}`);
+    }
+  }));
+  assert.deepEqual(problems, []);
+  t.diagnostic(`${TOOL_SEARCH_ROWS.length} ways to set it: ${outcomes.length} runs, the tool and the binary agreed on each`);
+});
+
+test("with tool search on, the request carries the tool names in a list and the instructions, and no schema: the sizes `check` gives for the names are the list's; a name over 128 characters is not listed", { skip: skip(), timeout: 300000 }, async (t) => {
+  const sb = withServers("ts-with");
   const on = await probeRun(sb, { env: { ENABLE_TOOL_SEARCH: "true" } });
-  assert.ok(mcpTools(off.request).length >= 3, "the fake API host turns tool search off by default");
-  assert.equal(mcpTools(on.request).length, 0, "ENABLE_TOOL_SEARCH=true defers every MCP tool");
-  assert.ok(toolNames(on.request).includes("ToolSearch"));
-  t.diagnostic(`request tools: ${off.request.tools.length} loaded up front, ${on.request.tools.length} with tool search on`);
-  // what the deferred servers cost anyway: the same run without the server
-  const bare = sandbox("toolsearch2");
+  assert.deepEqual(mcpTools(on.request), []);
+  assert.ok(toolNames(on.request).includes("ToolSearch"), "ToolSearch is how the model loads a schema");
+  const names = deferredNames(on.request);
+  assert.deepEqual(names.filter((n) => n.startsWith("mcp__")), ["mcp__fake__add", "mcp__fake__echo", "mcp__fake__list_items"], "the MCP names of the list, sorted");
+  assert.ok(RESOURCE_TOOLS.names.every((n) => names.includes(n)), "a server that offers resources adds the three resource tools to the list, by name");
+  assert.ok(JSON.stringify(on.request.messages).includes("## fake\\nUse the fake tools for tests only."), "the server's instructions are in the request as before");
+  const c = (await mine(sb, ["check", "--json", "--timeout", "20000"], { env: { ENABLE_TOOL_SEARCH: "true" } })).json();
+  const listed = names.filter((n) => n.startsWith("mcp__"));
+  assert.equal(c.toolSearch.mode, "deferred");
+  assert.equal(c.servers[0].cost.nameChars, listed.reduce((n, x) => n + x.length + 1, 0), "nameChars: each name and its line feed");
+  assert.equal(c.resourceTools.nameChars, RESOURCE_TOOLS.names.reduce((n, x) => n + x.length + 1, 0));
+  // what the server adds to the request, compared with the same run without it and with the schemas in the request
+  const size = (r) => JSON.stringify(r).replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, "<id>").length;
+  const bare = withServers("ts-none", {});
   const bareOn = await probeRun(bare, { env: { ENABLE_TOOL_SEARCH: "true" } });
   const bareOff = await probeRun(bare);
-  const size = (r) => JSON.stringify(r).replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, "<id>").length;
-  const names = size(on.request) - size(bareOn.request);
-  const upfront = size(off.request) - size(bareOff.request);
-  assert.ok(names > 0, "the server's name and instructions are still in the request");
-  assert.ok(names < upfront, `with tool search the server adds ${names} characters, loaded up front ${upfront}`);
-  t.diagnostic(`a server with 3 tools adds ${names} characters to the first request with tool search on, and ${upfront} when its schemas load up front`);
+  const off = await probeRun(sb);
+  const adds = size(on.request) - size(bareOn.request);
+  const addsUpFront = size(off.request) - size(bareOff.request);
+  assert.ok(adds >= c.servers[0].cost.nameChars + c.resourceTools.nameChars + c.servers[0].cost.instructionsChars, `the names and the instructions are in what the server adds (${adds})`);
+  assert.ok(adds < addsUpFront, `with tool search the server adds ${adds} characters, with the schemas in the request ${addsUpFront}`);
+  t.diagnostic(`a server with 3 tools adds ${adds} characters to the first request with tool search on (${c.servers[0].cost.nameChars} of them its names, ${c.resourceTools.nameChars} the resource tools' names), and ${addsUpFront} with its schemas in the request (${c.servers[0].cost.toolSchemaChars} of them, and ${c.resourceTools.chars} of the resource tools')`);
+  // names that are too long
+  const long = withServers("ts-long", { fake: fake("longname") });
+  const { request } = await probeRun(long, { env: { ENABLE_TOOL_SEARCH: "true" } });
+  const lengths = deferredNames(request).filter((n) => n.startsWith("mcp__fake__")).map((n) => n.length).sort((a, b) => a - b);
+  assert.deepEqual(lengths, [14, 15, 21, 127, 128], "127 and 128 are listed, 129 and 130 are not");
+  const lc = (await mine(long, ["check", "--json", "--timeout", "20000"], { env: { ENABLE_TOOL_SEARCH: "true" } })).json().servers[0];
+  assert.equal(lc.cost.toolsLeftOut.length, 2);
+  assert.equal(lc.cost.nameChars, lengths.reduce((n, x) => n + x + 1, 0));
+});
+
+test("the model loads a tool with ToolSearch: the next request carries that tool's definition, whole, flagged defer_loading, and the tool_result names it; `check` gives the size", { skip: skip(), timeout: 300000 }, async (t) => {
+  const sb = withServers("ts-load", { fake: fake("big") });
+  const { first, second } = await toolSearchRun(sb, "select:mcp__fake__add,mcp__fake__big_description");
+  assert.ok(first && second, "the run went on after the ToolSearch call");
+  assert.deepEqual(mcpTools(first), [], "the first request has no MCP schema");
+  const loaded = mcpTools(second);
+  assert.deepEqual(loaded.map((x) => x.name).sort(), ["mcp__fake__add", "mcp__fake__big_description"], "only the tools the model asked for");
+  for (const x of loaded) assert.deepEqual(Object.keys(x).sort(), ["defer_loading", "description", "input_schema", "name"], x.name);
+  assert.ok(loaded.every((x) => x.defer_loading === true));
+  const result = second.messages.flatMap((m) => (Array.isArray(m.content) ? m.content : [])).find((b) => b.type === "tool_result");
+  assert.deepEqual(result.content.filter((b) => b.type === "tool_reference").map((b) => b.tool_name), ["mcp__fake__add", "mcp__fake__big_description"], "the answer of ToolSearch is a pair of tool_reference blocks");
+  // the size: the same JSON `check` measures, and the description of 6,000 characters is whole (up front it is cut at 4,096)
+  const c = (await mine(sb, ["check", "--json", "--timeout", "20000"], { env: { ENABLE_TOOL_SEARCH: "true" } })).json().servers[0];
+  for (const x of loaded) assert.equal(JSON.stringify({ name: x.name, description: x.description, input_schema: x.input_schema }).length, c.cost.perTool.find((p) => p.name === x.name).loadedChars, x.name);
+  const big = loaded.find((x) => x.name === "mcp__fake__big_description");
+  assert.equal(big.description.length, 6000, "not cut when the model loads the tool");
+  assert.ok(c.cost.loadedSchemaChars > c.cost.toolSchemaChars);
+  t.diagnostic(`loaded: ${loaded.map((x) => `${x.name} ${JSON.stringify({ name: x.name, description: x.description, input_schema: x.input_schema }).length}`).join(", ")} characters; the whole server is ${c.cost.loadedSchemaChars} loaded, ${c.cost.toolSchemaChars} up front`);
+});
+
+test("an endpoint that refuses deferred tools (HTTP 400) gets the request again with the schemas in it, from 2.1.304, and the run still ends", { skip: skip(), timeout: 300000 }, async (t) => {
+  const sb = withServers("ts-refuse");
+  const api = await fakeApi(undefined, { refuseDeferred: true });
+  let r;
+  try { r = await runClaude(sb, api, ["-p", "PROBE-MAIN hello", "--output-format", "stream-json", "--verbose"], { env: { ENABLE_TOOL_SEARCH: "true" } }); } finally { await api.close(); }
+  const main = api.requests.filter((j) => userText(j).includes("PROBE-MAIN"));
+  const last = main[main.length - 1];
+  t.diagnostic(`Claude Code ${versionText()}: ${main.length} requests, ${main.filter((j) => JSON.stringify(j).includes('"defer_loading"')).length} of them with deferred tools; the last carried ${mcpTools(last).length} MCP schemas; the run exited ${r.code}`);
+  if (atLeast(2, 1, 304)) {
+    assert.ok(main.length >= 2, "the first request was refused and sent again");
+    assert.ok(JSON.stringify(main[0]).includes('"defer_loading"'));
+    assert.equal(r.code, 0, r.out + r.err);
+    assert.ok(!JSON.stringify(last).includes('"defer_loading"'), "the request that was answered has no deferred tool");
+    assert.equal(mcpTools(last).length, 3, "and has the schemas, as the tool says for a refusable host");
+  }
 });
 
 // ---- (b) approval, the project's switch, policy: `show` against `claude mcp list` and `get` -----------------------------------
@@ -1310,7 +1447,7 @@ test("installed from a marketplace, the plugin's own cost projection is small an
   t.diagnostic(`claude plugin details: ${always[0].replace(/\s+/g, " ")}; per component: ${row ? row[0].trim().replace(/\s+/g, " ") : "(no row)"}`);
 });
 
-test("when the shell tool is not allowed for the command, Claude Code hands the model the command line as 'run this first', and the skill text reads right that way too (Windows, PowerShell tool)", { skip: skip() || (!IS_WIN && "this is how the PowerShell tool of a Windows setup behaves here"), timeout: 180000 }, async () => {
+test("when the shell tool is not allowed for the command, Claude Code (up to 2.1.301) hands the model the command line as 'run this first', and the skill text reads right that way too; from 2.1.302 `claude -p` does not hand it over (Windows, PowerShell tool)", { skip: skip() || (!IS_WIN && "this is how the PowerShell tool of a Windows setup behaves here"), timeout: 180000 }, async () => {
   const copy = path.join(sandbox("copy").root, "plugin");
   for (const item of ["bin", "src", "skills", ".claude-plugin", "package.json"]) fs.cpSync(path.join(ROOT, item), path.join(copy, item), { recursive: true });
   const skillFile = path.join(copy, "skills", "check", "SKILL.md");
@@ -1323,6 +1460,14 @@ test("when the shell tool is not allowed for the command, Claude Code hands the 
   try {
     const r = await runClaude(sb, api, ["-p", "/mcp-check:check", "--plugin-dir", copy, "--output-format", "json"], { env: { CLAUDE_CODE_USE_POWERSHELL_TOOL: "1", CLAUDE_CODE_GIT_BASH_PATH: "C:/nonexistent/bash.exe" } });
     assert.equal(r.code, 0, r.err);
+    if (atLeast(2, 1, 302)) {
+      // from 2.1.302 a skill whose command line the shell tool may not run is not handed to the model by `claude -p` at all:
+      // the run ends with an empty result, as a local command, and no request is made (the plugin's skill has allowed-tools, so it is not affected)
+      assert.equal(api.requests.length, 0, "no request: the skill never reached the model");
+      assert.equal(r.result.local_command, "custom");
+      assert.equal(r.result.result, "");
+      return;
+    }
     const req = api.requests.find((x) => textBlocks(x).some((b) => b.startsWith("Base directory for this skill"))) || api.requests[0];
     const skillText = textBlocks(req).find((b) => b.startsWith("Base directory for this skill"));
     assert.ok(skillText, "the skill reached the model");

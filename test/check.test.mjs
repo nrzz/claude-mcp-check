@@ -97,7 +97,7 @@ test("the text report: the lines for a server that answers and one that does not
   assert.match(r.out, /exited with code 3 after \d+ ms, before answering initialize/);
   assert.match(r.out, /not started: the command was not found/);
   assert.match(r.out, /3 servers started, 1 answered, 2 failed, 0 not started\./);
-  assert.match(r.out, /tool search/);
+  assert.match(r.out, /Tool search is on \(ENABLE_TOOL_SEARCH is not set: Claude Code defers MCP tools by default\): the request carries the names of the 3 tools, \d+ characters/);
 });
 
 test("the timeout comes from MCP_TIMEOUT when --timeout is not given, and the report says where it came from", async () => {

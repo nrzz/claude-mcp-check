@@ -2,7 +2,7 @@
 import "./helpers.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DESCRIPTION_LIMIT, TRUNCATION, measureInstructions, measureTools, sentTool, tokensOf } from "../src/measure.mjs";
+import { DESCRIPTION_LIMIT, RESOURCE_TOOLS, TRUNCATION, measureInstructions, measureTools, sentTool, tokensOf } from "../src/measure.mjs";
 import { MAX_TOOL_NAME, normalizeName, toolNameFor, toolPrefix } from "../src/names.mjs";
 import { BIG_TOOL, LONG_TOOLS, TOOLS } from "./fake-mcp-server.mjs";
 
@@ -46,6 +46,23 @@ test("the size of the tools is the size of the JSON that is sent, in characters,
   assert.equal(tokensOf(0), 0);
 });
 
+test("with tool search the tool is loaded whole and the request lists the names: loadedChars and nameChars", () => {
+  const m = measureTools("fake", [...TOOLS, BIG_TOOL]);
+  const big = m.tools.find((t) => t.tool === "big_description");
+  assert.equal(big.cut, true);
+  assert.equal(big.loadedChars - big.chars, BIG_TOOL.description.length - (DESCRIPTION_LIMIT + TRUNCATION.length), "the description is not cut when the model loads the tool");
+  for (const t of m.tools.filter((x) => x.tool !== "big_description")) assert.equal(t.loadedChars, t.chars, t.name);
+  assert.equal(m.loadedChars, m.tools.reduce((n, t) => n + t.loadedChars, 0));
+  assert.equal(m.loadedTokens, Math.round(m.loadedChars / 4));
+  assert.equal(m.nameChars, m.tools.reduce((n, t) => n + t.name.length + 1, 0), "each name and a line feed");
+  assert.equal(m.nameChars, "mcp__fake__add\nmcp__fake__big_description\nmcp__fake__echo\nmcp__fake__list_items\n".length);
+  assert.equal(m.nameTokens, Math.round(m.nameChars / 4));
+  // a tool left out for its name is not listed either
+  const long = measureTools("fake", LONG_TOOLS);
+  assert.equal(long.nameChars, long.tools.reduce((n, t) => n + t.name.length + 1, 0));
+  assert.equal(RESOURCE_TOOLS.nameChars, "ListMcpResourcesTool\nReadMcpResourceDirTool\nReadMcpResourceTool\n".length);
+});
+
 test("a tool whose full name is over 128 characters is left out and counted apart", () => {
   const m = measureTools("fake", LONG_TOOLS);
   assert.equal(m.count, 4);
@@ -55,7 +72,7 @@ test("a tool whose full name is over 128 characters is left out and counted apar
 });
 
 test("tools of a server without tools, and entries that are not tools", () => {
-  assert.deepEqual(measureTools("x", []), { count: 0, sent: 0, leftOut: [], chars: 0, tokens: 0, cut: 0, tools: [] });
+  assert.deepEqual(measureTools("x", []), { count: 0, sent: 0, leftOut: [], chars: 0, tokens: 0, cut: 0, loadedChars: 0, loadedTokens: 0, nameChars: 0, nameTokens: 0, tools: [] });
   assert.equal(measureTools("x", [null, {}, { name: "ok" }]).sent, 1);
   assert.equal(measureTools("x", undefined).count, 0);
 });

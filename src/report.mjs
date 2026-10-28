@@ -5,6 +5,7 @@ import { VERSION } from "./version.mjs";
 import { redactArgs, redactCommand, redactText, redactUrl } from "./redact.mjs";
 import { countFindings } from "./lint.mjs";
 import { RESOURCE_TOOLS } from "./measure.mjs";
+import { toolSearchJson, toolSearchOf, toolSearchSentence } from "./toolsearch.mjs";
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const pad = (s, n) => String(s) + " ".repeat(Math.max(0, n - String(s).length));
@@ -70,6 +71,7 @@ export function showJson(ctx, model) {
     }),
     collisions: model.collisions,
     problems: model.problems.map((p) => ({ id: p.id, file: p.file, display: p.display, line: p.line || null, message: p.message })),
+    toolSearch: toolSearchJson(toolSearchOf(ctx.childEnv)),
     counts: { servers: model.servers.length, active: model.servers.filter((s) => s.loads).length, pending: model.servers.filter((s) => s.state === "pending").length },
   };
 }
@@ -80,6 +82,7 @@ export function showText(ctx, model) {
   out.push(`project   ${ctx.project}${ctx.projectKey !== ctx.project.split("\\").join("/") ? `  (project key ${ctx.projectKey}: the root of the git repository)` : ""}`);
   out.push(`config    ${ctx.configDir}  (${ctx.configSource === "CLAUDE_CONFIG_DIR" ? "from CLAUDE_CONFIG_DIR" : "default"}); servers in ${ctx.claudeJson.display}${ctx.claudeJson.exists ? "" : " (not found)"}`);
   out.push(`trust     ${ctx.trusted ? "this folder is trusted" : "this folder is not trusted yet: its own settings files approve no .mcp.json server"}`);
+  if (model.servers.some((s) => s.loads || s.headlessLoads)) out.push(`tools     ${toolSearchSentence(toolSearchOf(ctx.childEnv))}`);
   out.push("");
   out.push("Where servers come from, highest precedence first");
   const rows = model.sources.map((s) => [s.kind === "flag" ? "--mcp-config" : s.kind === "managed-file" || s.kind === "managed" ? "managed" : s.kind, !s.exists ? "not found" : plural(s.servers, "server"), `${s.display}${s.note && s.exists ? `  (${s.note})` : ""}`]);
@@ -145,22 +148,51 @@ export function checkJson(ctx, results, { timeout }) {
       tools: p && p.tools ? { ok: p.tools.ok, names: (p.tools.items || []).map((t) => t && t.name) } : null,
       resources: p && p.resources ? { ok: p.resources.ok, names: (p.resources.items || []).map((t) => t && (t.name || t.uri)) } : null,
       prompts: p && p.prompts ? { ok: p.prompts.ok, names: (p.prompts.items || []).map((t) => t && t.name) } : null,
-      cost: r.cost ? { toolSchemaChars: r.cost.tools.chars, toolSchemaTokensEstimate: r.cost.tools.tokens, toolsSent: r.cost.tools.sent, toolsLeftOut: r.cost.tools.leftOut, descriptionsCut: r.cost.tools.cut, instructionsChars: r.cost.instructions.chars, instructionsTokensEstimate: r.cost.instructions.tokens, perTool: r.cost.tools.tools.map((t) => ({ name: t.name, chars: t.chars, tokensEstimate: t.tokens })) } : null,
+      cost: r.cost ? { toolSchemaChars: r.cost.tools.chars, toolSchemaTokensEstimate: r.cost.tools.tokens, loadedSchemaChars: r.cost.tools.loadedChars, loadedSchemaTokensEstimate: r.cost.tools.loadedTokens, nameChars: r.cost.tools.nameChars, nameTokensEstimate: r.cost.tools.nameTokens, toolsSent: r.cost.tools.sent, toolsLeftOut: r.cost.tools.leftOut, descriptionsCut: r.cost.tools.cut, instructionsChars: r.cost.instructions.chars, instructionsTokensEstimate: r.cost.instructions.tokens, perTool: r.cost.tools.tools.map((t) => ({ name: t.name, chars: t.chars, tokensEstimate: t.tokens, loadedChars: t.loadedChars })) } : null,
       notes: r.notes,
     };
   };
   const answered = results.filter((r) => r.ok);
   const sum = (f) => answered.reduce((n, r) => n + f(r), 0);
+  const ts = toolSearchOf(ctx.childEnv);
+  const totals = { servers: results.length, started: results.filter((r) => r.checked).length, answered: answered.length, failed: results.filter((r) => r.checked && !r.ok).length, skipped: results.filter((r) => !r.checked).length, tools: sum((r) => (r.counts ? r.counts.tools : 0)), toolSchemaChars: sum((r) => (r.cost ? r.cost.tools.chars : 0)), toolSchemaTokensEstimate: sum((r) => (r.cost ? r.cost.tools.tokens : 0)), loadedSchemaChars: sum((r) => (r.cost ? r.cost.tools.loadedChars : 0)), nameChars: sum((r) => (r.cost ? r.cost.tools.nameChars : 0)), instructionsChars: sum((r) => (r.cost ? r.cost.instructions.chars : 0)), serversOfferingResources: answered.filter((r) => r.counts && r.counts.resources !== null).length };
+  // what the request carries for the tools themselves, in the mode that tool search is in; null when it depends (auto, or a version that is not known)
+  const carried = ts.mode === "upfront" ? totals.toolSchemaChars : ts.mode === "deferred" ? totals.nameChars : null;
+  totals.carriedChars = carried;
+  totals.carriedTokensEstimate = carried === null ? null : Math.round(carried / 4);
   return {
     project: ctx.project, timeoutMs: timeout.ms, timeoutSource: timeout.source, mcpTimeout: timeout.mcpTimeout,
+    toolSearch: toolSearchJson(ts),
     servers: results.map(slim),
-    totals: { servers: results.length, started: results.filter((r) => r.checked).length, answered: answered.length, failed: results.filter((r) => r.checked && !r.ok).length, skipped: results.filter((r) => !r.checked).length, tools: sum((r) => (r.counts ? r.counts.tools : 0)), toolSchemaChars: sum((r) => (r.cost ? r.cost.tools.chars : 0)), toolSchemaTokensEstimate: sum((r) => (r.cost ? r.cost.tools.tokens : 0)), instructionsChars: sum((r) => (r.cost ? r.cost.instructions.chars : 0)), serversOfferingResources: answered.filter((r) => r.counts && r.counts.resources !== null).length },
-    resourceTools: { ...RESOURCE_TOOLS, tokensEstimate: Math.round(RESOURCE_TOOLS.chars / 4) },
-    note: "Token figures are characters / 4, an estimate. They are what is sent when the schemas load up front; with tool search (the default on Claude Code's own API host) only the names load until the model asks for a tool.",
+    totals,
+    resourceTools: { ...RESOURCE_TOOLS, tokensEstimate: Math.round(RESOURCE_TOOLS.chars / 4), nameTokensEstimate: Math.round(RESOURCE_TOOLS.nameChars / 4) },
+    note: "Token figures are characters / 4, an estimate. toolSearch.mode says what the request carries: upfront, every schema (toolSchemaChars); deferred, the names (nameChars) and a schema, whole, when the model loads the tool (loadedSchemaChars); auto and depends, either, and carriedChars is null.",
   };
 }
 
+const EST = "(characters / 4, an estimate)";
+const tokensText = (chars) => num(Math.round(chars / 4));
+
+/** The line of a server that answered: what its tools cost, in the mode that tool search is in. */
+function schemaLine(t, instructions, ts) {
+  const instr = instructions.chars ? `; server instructions ${num(instructions.chars)} characters, about ${num(instructions.tokens)} tokens` : "";
+  if (ts.mode === "deferred") return `tool schemas: ${num(t.loadedChars)} characters, about ${num(t.loadedTokens)} tokens ${EST}, added when the model loads a tool; the request carries only the ${plural(t.sent, "tool name")}: ${num(t.nameChars)} characters, about ${num(t.nameTokens)} tokens${instr}`;
+  if (ts.mode === "auto") return `tool schemas: ${num(t.chars)} characters, about ${num(t.tokens)} tokens ${EST}, in the request unless the MCP tools of all servers pass ${ts.autoPercent}% of the context window (then ${num(t.nameChars)} characters of names)${instr}`;
+  if (ts.mode === "depends") return `tool schemas: ${num(t.chars)} characters, about ${num(t.tokens)} tokens ${EST} if they are in the request; with tool search ${num(t.nameChars)} characters of names, and a schema when the model loads the tool${instr}`;
+  return `tool schemas: ${num(t.chars)} characters, about ${num(t.tokens)} tokens ${EST}${instr}`;
+}
+
+/** The closing paragraph of `check`: what the request carries for the tools of the servers that answered, and why. */
+function toolSearchParagraph(ts, { tools, chars, names, instructions }) {
+  const instr = instructions ? `, and the server instructions, ${num(instructions)} characters` : "";
+  if (ts.mode === "deferred") return `Tool search is on (${ts.reason}): the request carries the names of the ${plural(tools, "tool")}, ${num(names)} characters, about ${tokensText(names)} tokens${instr}; a tool's schema is added when the model loads it.${ts.refusable ? ` If the endpoint refuses deferred tools, Claude Code sends the request again with the schemas in it: ${num(chars)} characters, about ${tokensText(chars)} tokens.` : ""}`;
+  if (ts.mode === "upfront") return `Tool search is off (${ts.reason}): the request carries the schemas of the ${plural(tools, "tool")}, ${num(chars)} characters, about ${tokensText(chars)} tokens${instr}.`;
+  if (ts.mode === "auto") return `${ts.reason}. These ${plural(tools, "tool")} are ${num(chars)} characters of schemas, about ${tokensText(chars)} tokens; Claude Code compares the MCP tools of all servers with the threshold and above it carries only their names (${num(names)} characters). The context window of your model is not known to this tool.`;
+  return `${ts.reason}. If tool search is on, the request carries the names of the ${plural(tools, "tool")}, ${num(names)} characters, about ${tokensText(names)} tokens, and a schema when the model loads a tool; if it is off, it carries all the schemas, ${num(chars)} characters, about ${tokensText(chars)} tokens.${instructions ? ` The server instructions, ${num(instructions)} characters, are in the request either way.` : ""}`;
+}
+
 export function checkText(ctx, results, { timeout }) {
+  const ts = toolSearchOf(ctx.childEnv);
   const out = [];
   out.push(`claude-mcp-check ${VERSION}  check`);
   out.push(`project   ${ctx.project}`);
@@ -180,8 +212,8 @@ export function checkText(ctx, results, { timeout }) {
       const c = r.counts;
       out.push(`    ${plural(c.tools, "tool")}, ${c.resources === null ? "no resources" : plural(c.resources, "resource")}, ${c.prompts === null ? "no prompts" : plural(c.prompts, "prompt")}${p.tools && !p.tools.ok ? "  ! tools/list failed" : ""}`);
       const t = r.cost.tools;
-      out.push(`    tool schemas: ${num(t.chars)} characters, about ${num(t.tokens)} tokens (characters / 4, an estimate)${r.cost.instructions.chars ? `; server instructions ${num(r.cost.instructions.chars)} characters, about ${num(r.cost.instructions.tokens)} tokens` : ""}`);
-      if (t.cut) out.push(`    ${plural(t.cut, "description")} cut at 4,096 characters, as Claude Code cuts them`);
+      out.push(`    ${schemaLine(t, r.cost.instructions, ts)}`);
+      if (t.cut) out.push(ts.mode === "deferred" ? `    ${plural(t.cut, "description")} over 4,096 characters: Claude Code cuts ${t.cut === 1 ? "it" : "them"} when the schemas are in the request and does not when the model loads the tool` : `    ${plural(t.cut, "description")} cut at 4,096 characters, as Claude Code cuts them${ts.mode === "upfront" ? "" : " when the schemas are in the request (not when the model loads the tool)"}`);
       if (t.leftOut.length) out.push(`    ! ${plural(t.leftOut.length, "tool")} left out by Claude Code: the full name is over 128 characters (${t.leftOut.map((x) => x.name).slice(0, 2).join(", ")})`);
       for (const n of r.notes) out.push(`    ! ${n}`);
       if (p.other && p.other.lines) out.push(`    ! stdout held ${plural(p.other.lines, "line")} that ${p.other.lines === 1 ? "is" : "are"} not JSON-RPC`);
@@ -200,13 +232,25 @@ export function checkText(ctx, results, { timeout }) {
   }
   const answered = results.filter((r) => r.ok);
   if (results.length) {
-    const chars = answered.reduce((n, r) => n + r.cost.tools.chars, 0);
-    const tools = answered.reduce((n, r) => n + r.counts.tools, 0);
+    const sumOf = (f) => answered.reduce((n, r) => n + f(r), 0);
+    const chars = sumOf((r) => r.cost.tools.chars);
+    const loaded = sumOf((r) => r.cost.tools.loadedChars);
+    const names = sumOf((r) => r.cost.tools.nameChars);
+    const instructions = sumOf((r) => r.cost.instructions.chars);
+    const tools = sumOf((r) => r.counts.tools);
     const started = results.filter((r) => r.checked).length;
     out.push(`${plural(started, "server")} started, ${answered.length} answered, ${results.filter((r) => r.checked && !r.ok).length} failed, ${results.filter((r) => !r.checked).length} not started.`);
-    if (answered.length) out.push(`${plural(tools, "tool")} in all; their schemas are ${num(chars)} characters, about ${num(Math.round(chars / 4))} tokens (characters / 4, an estimate).`);
-    if (answered.some((r) => r.counts.resources !== null)) out.push(`A server that offers resources also makes Claude Code send ${RESOURCE_TOOLS.names.length} tools of its own (${RESOURCE_TOOLS.names.join(", ")}), once for all servers: ${num(RESOURCE_TOOLS.chars)} characters, about ${num(Math.round(RESOURCE_TOOLS.chars / 4))} tokens, as measured on Claude Code ${RESOURCE_TOOLS.measuredOn}.`);
-    out.push("Those schemas load up front unless Claude Code defers them behind tool search (always with ENABLE_TOOL_SEARCH=true; automatically once MCP tool descriptions pass a share of the context window, says Claude Code's changelog): then only the names load until the model asks for a tool.");
+    if (answered.length) {
+      const shown = ts.mode === "deferred" ? loaded : chars;
+      out.push(`${plural(tools, "tool")} in all; their schemas are ${num(shown)} characters, about ${tokensText(shown)} tokens ${EST}${ts.mode === "deferred" ? ", if the model loads every one" : ""}.`);
+    }
+    const resourceTools = RESOURCE_TOOLS.names.length;
+    if (answered.some((r) => r.counts.resources !== null)) {
+      const schemas = `${num(RESOURCE_TOOLS.chars)} characters, about ${tokensText(RESOURCE_TOOLS.chars)} tokens, as measured on Claude Code ${RESOURCE_TOOLS.measuredOn}`;
+      if (ts.mode === "deferred") out.push(`A server that offers resources also adds ${resourceTools} tool names to the list (${RESOURCE_TOOLS.names.join(", ")}), once for all servers: ${num(RESOURCE_TOOLS.nameChars)} characters, about ${tokensText(RESOURCE_TOOLS.nameChars)} tokens; their schemas, ${schemas}, are added only when the model loads them.`);
+      else out.push(`A server that offers resources also makes Claude Code send ${resourceTools} tools of its own (${RESOURCE_TOOLS.names.join(", ")}), once for all servers: ${schemas}${ts.mode === "upfront" ? "" : `; deferred, only their names (${num(RESOURCE_TOOLS.nameChars)} characters)`}.`);
+    }
+    if (answered.length) out.push(toolSearchParagraph(ts, { tools, chars, names, instructions }));
   }
   return `${out.join("\n")}\n`;
 }

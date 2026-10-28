@@ -2,6 +2,16 @@
 
 All notable changes to claude-mcp-check are written here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [1.1.0] - 2026-10-28
+
+- **Tool search.** From Claude Code 2.1.304 the MCP tools are deferred behind tool search by default, for every host: the first request carries the names of the tools in a list (with the server instructions), no schema, and a tool's schema is added when the model loads it with `ToolSearch`. Up to 2.1.303 only Anthropic's own host got that; any other `ANTHROPIC_BASE_URL` got the schemas in the request unless `ENABLE_TOOL_SEARCH` was set. The scheduled run of the real-binary checks failed on 26 October on Claude Code 2.1.310 for this reason: it looked for MCP schemas in the request. `check` and `show` had assumed the schemas are up front.
+- `check` now says which the request carries, from `ENABLE_TOOL_SEARCH`, `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`, `ANTHROPIC_BASE_URL` (the host only) and, when it runs inside Claude Code, the version in `AI_AGENT`, with the `env` of the settings files over the environment as Claude Code has it. It gives the size of the schemas up front (`toolSchemaChars`), the size of the list of names (`nameChars`) and the size of a schema when the model loads the tool (`loadedSchemaChars`: a description over 4,096 characters is not cut then), per server and per tool, and `totals.carriedChars`, what the request carries. When it cannot tell (`ENABLE_TOOL_SEARCH=auto`, or another host with the version not known) it says so and gives both. The three resource tools are three more names in the list when tool search is on.
+- `show` has a `tools` line and `toolSearch` in `--json`; `check --json` has `toolSearch`, the new `cost` and `totals` fields and `resourceTools.nameChars`.
+- The real-binary checks: every check that reads schemas out of the request asks for them (`ENABLE_TOOL_SEARCH=false`, honoured by every version), and new checks put tool search itself to the binary: the default by version (2.1.304), 38 spellings and places of `ENABLE_TOOL_SEARCH`, the names in the first request, the tool the model loads, an endpoint that answers 400, and `AI_AGENT`. 61 real-binary checks, 56 before. The check of a skill without `allowed-tools` follows a change of Claude Code 2.1.302: `claude -p` no longer hands such a skill to the model.
+- The README's "What was verified, and how" has the versions and the findings.
+
 ## [1.0.0] - 2026-10-16
 
 - First release. A CLI and a Claude Code plugin with one user-only skill, `/mcp-check:check`.
@@ -13,4 +23,5 @@ All notable changes to claude-mcp-check are written here. The format follows [Ke
 - What Claude Code does is what the real binary did: `test/e2e-claude.test.mjs` puts the sources, the states, the expansion, the command lookup, the policy lists, the tools of a run and the toggles to Claude Code 2.1.295 and 2.1.299 on Windows, and the same checks run in CI on Linux and macOS (2.1.295, 2.1.299 and 2.1.301 were run there). The two systems differ in how a command written as one string is read (split on Windows, not on Linux and macOS) and in what a missing command is reported as; the tool follows each (README "What was verified").
 - Zero tokens for the tool. The skill is user-only, adds nothing to a request that does not use it, and hands the model a report of at most 12 findings.
 
+[1.1.0]: https://github.com/nrzz/claude-mcp-check/releases/tag/v1.1.0
 [1.0.0]: https://github.com/nrzz/claude-mcp-check/releases/tag/v1.0.0
