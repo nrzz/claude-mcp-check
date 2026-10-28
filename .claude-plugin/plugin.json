@@ -1,7 +1,7 @@
 {
   "name": "mcp-check",
   "displayName": "MCP Check",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Every MCP server Claude Code would load, from which file, whether it starts, and what its tools cost. One user-only skill: /mcp-check:check.",
   "author": { "name": "Naresh Prabu" },
   "homepage": "https://github.com/nrzz/claude-mcp-check",

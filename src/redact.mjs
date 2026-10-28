@@ -15,15 +15,17 @@ export function hideDefaults(text) {
 
 const isReference = (v) => /^\$\{[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\}$/.test(v);
 
-/** Says whether a (name, value) pair looks like a credential. A ${VAR} reference is never a credential. */
+/**
+ * Says whether a (name, value) pair looks like a credential. A ${VAR} reference (with or without a default) is never a credential,
+ * and neither is a Bearer or Basic in front of one: what is judged is the literal text that is left when the references are taken
+ * out, so that `abc123secret${X}` is hidden and flagged (its literal part is a secret) and `Bearer ${TOKEN}` is not.
+ */
 export function looksLikeCredential(name, value) {
   if (value === undefined || value === null) return false;
-  const s = String(value);
-  if (s === "") return false;
-  if (/\$\{([A-Za-z_][A-Za-z0-9_]*)(:-[^}]*)?\}/.test(s)) return false;
+  const literal = String(value).replace(REFERENCE, "").replace(/^\s*(Bearer|Basic)\s*/i, "").trim();
+  if (literal === "") return false;
   if (name && SECRET_NAME.test(String(name))) return true;
-  const bare = s.replace(/^(Bearer|Basic)\s+/i, "");
-  return KEY_SHAPE.test(bare);
+  return KEY_SHAPE.test(literal);
 }
 
 /** A URL with the password, the user name of a "user:password@" part and the secret-looking query values masked. */

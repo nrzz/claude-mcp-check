@@ -23,8 +23,8 @@ Read (they change nothing):
   lint     [--project <dir>] [--mcp-config <file>]... [--markdown]
            a name defined in two scopes, a command that is not on the PATH, a \${VAR} that is set
            nowhere, a .mcp.json server nobody approved, a server both enabled and disabled, a list
-           key that holds a plain string, a plain-http URL, an invalid entry or file, names that
-           share a tool prefix. Exit 1 on an error or a warning. --markdown is the short report the
+           key that holds a plain string, a plain-http URL, a credential written out in a .mcp.json,
+           an invalid entry or file, names that share a tool prefix. Exit 1 on an error or a warning. --markdown is the short report the
            /mcp-check:check skill hands to Claude (at most 12 findings, 16 lines); it always exits 0, because
            Claude Code drops a skill whose command fails
 

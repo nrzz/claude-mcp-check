@@ -4,7 +4,11 @@ All notable changes to claude-mcp-check are written here. The format follows [Ke
 
 ## [Unreleased]
 
-- `lint`: `literal-credential` finding for a `.mcp.json` that holds a credential written out instead of a `${VAR}` reference.
+## [1.2.0] - 2026-10-28
+
+- `lint`: `literal-credential`, a warning for a `.mcp.json` that holds a credential written out instead of a `${VAR}` reference: the value of a flag (`--api-key sk-...`, `--token=...`), an `env` value, a header, the password or a secret-named value of a URL. It names the server, the file, the line and the field, never the value; a `${VAR}` reference, with or without a default, is never a finding, and `~/.claude.json` is private and is not checked. `looksLikeCredential` in `src/redact.mjs` is the one test that the redaction and the lint share.
+- Contributed by [@yoreva-01](https://github.com/yoreva-01) in [#2](https://github.com/nrzz/claude-mcp-check/pull/2), for the good first issue [#1](https://github.com/nrzz/claude-mcp-check/issues/1).
+- Fixed in the release: a secret written next to a `${VAR}` (`--token=abc123secret${X}`, `?token=abc123secret${X}`, `user:hunter2${X}@host`) was printed by `show`, `check` and `lint` once the redaction used the new test, because the test took any value that holds a reference for a reference. It judges what is left when the references are taken out, so the literal part is hidden and flagged, and `Bearer ${TOKEN}` is still not a credential.
 
 ## [1.1.0] - 2026-10-28
 
@@ -25,5 +29,6 @@ All notable changes to claude-mcp-check are written here. The format follows [Ke
 - What Claude Code does is what the real binary did: `test/e2e-claude.test.mjs` puts the sources, the states, the expansion, the command lookup, the policy lists, the tools of a run and the toggles to Claude Code 2.1.295 and 2.1.299 on Windows, and the same checks run in CI on Linux and macOS (2.1.295, 2.1.299 and 2.1.301 were run there). The two systems differ in how a command written as one string is read (split on Windows, not on Linux and macOS) and in what a missing command is reported as; the tool follows each (README "What was verified").
 - Zero tokens for the tool. The skill is user-only, adds nothing to a request that does not use it, and hands the model a report of at most 12 findings.
 
+[1.2.0]: https://github.com/nrzz/claude-mcp-check/releases/tag/v1.2.0
 [1.1.0]: https://github.com/nrzz/claude-mcp-check/releases/tag/v1.1.0
 [1.0.0]: https://github.com/nrzz/claude-mcp-check/releases/tag/v1.0.0

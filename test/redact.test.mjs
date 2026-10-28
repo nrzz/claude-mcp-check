@@ -61,3 +61,17 @@ test("looksLikeCredential matches secret names, key shapes, and ignores referenc
   assert.equal(looksLikeCredential("api_key", null), false);
   assert.equal(looksLikeCredential("HOST", "localhost"), false);
 });
+
+test("a literal next to a ${VAR} is still a literal: its text is hidden, and only an all-reference value is shown", () => {
+  // a secret written in front of or behind a reference (the redaction did hide these before looksLikeCredential, and still does)
+  assert.deepEqual(redactArgs(["--token=abc123secret${X}", "--api-key", "hunter2${Y}", "--password", "${P}", "--token=${T}", "--token=${T:-fallback}"]), [`--token=${MASK}`, "--api-key", MASK, "--password", "${P}", "--token=${T}", "--token=${T:-…}"]);
+  assert.equal(redactUrl("http://h/mcp?token=abc123secret${X}&key=${K}&x=1"), `http://h/mcp?token=${MASK}&key=\${K}&x=1`);
+  assert.equal(redactUrl("http://user:hunter2${X}@h/mcp"), `http://user:${MASK}@h/mcp`);
+  assert.equal(redactUrl("http://user:${PASS}@h/mcp"), "http://user:${PASS}@h/mcp");
+  assert.equal(looksLikeCredential("TOKEN", "abc123secret${X}"), true);
+  assert.equal(looksLikeCredential("TOKEN", "${A}${B}"), false);
+  assert.equal(looksLikeCredential("Authorization", "Bearer ${T}"), false);
+  assert.equal(looksLikeCredential("Authorization", "Basic ${T}"), false);
+  assert.equal(looksLikeCredential("Authorization", "Bearer abc123secret${T}"), true);
+  assert.equal(looksLikeCredential(null, "sk-live-0123456789abcdef${X}"), true);
+});

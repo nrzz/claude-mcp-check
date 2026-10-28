@@ -1452,8 +1452,8 @@ test("when the shell tool is not allowed for the command, Claude Code (up to 2.1
   for (const item of ["bin", "src", "skills", ".claude-plugin", "package.json"]) fs.cpSync(path.join(ROOT, item), path.join(copy, item), { recursive: true });
   const skillFile = path.join(copy, "skills", "check", "SKILL.md");
   const text = fs.readFileSync(skillFile, "utf8");
-  assert.match(text, /^allowed-tools: .*\n/m);
-  fs.writeFileSync(skillFile, text.replace(/^allowed-tools: .*\n/m, ""));
+  assert.match(text, /^allowed-tools: .*\r?\n/m);
+  fs.writeFileSync(skillFile, text.replace(/^allowed-tools: .*\r?\n/m, ""));
   const sb = sandbox("runfirst");
   patchClaudeJson(sb, { mcpServers: { u1: fake("ok") } });
   const api = await fakeApi();

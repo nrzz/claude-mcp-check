@@ -201,6 +201,7 @@ test("the licence, the conduct file, the changelog and the version agree", () =>
   assert.match(read("SECURITY.md"), /security\/advisories\/new/);
   const roadmap = read("ROADMAP.md");
   assert.ok((roadmap.match(/^- /gm) || []).length >= 3 && (roadmap.match(/^- /gm) || []).length <= 5, "three to five next steps");
+  assert.match(roadmap, /good first issue: \[#3\]\(https:\/\/github\.com\/nrzz\/claude-mcp-check\/issues\/3\)/, "the roadmap names the good first issue");
 });
 
 test("the issue forms and the pull request template are there", () => {

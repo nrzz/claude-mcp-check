@@ -1,6 +1,6 @@
 {
   "name": "claude-mcp-check",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Every MCP server Claude Code would load, from which file, whether it starts and answers the handshake, and what its tools cost in context. Approve, switch off, lint, explain a failure. Zero tokens.",
   "type": "module",
   "bin": {

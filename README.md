@@ -15,7 +15,7 @@ claude-mcp-check shows every MCP server Claude Code would load for a project, fr
   - a name defined in two scopes, and names that become the same tool prefix, so that one server's tools never reach the model;
   - a command that is not on the PATH, a `${VAR}` set nowhere (or set only where Claude Code does not look), a credential name that reads as empty in a remote server's headers;
   - a `.mcp.json` server nobody approved, a server both enabled and disabled, a list key that holds a plain string, an approval for a name that is not there;
-  - a plain-http URL, an empty URL;
+  - a plain-http URL, an empty URL, a credential written out in a shared `.mcp.json` (a flag's value, an `env` value, a header, the password or a secret-named value of a URL), named by field and never printed;
   - a file Claude Code ignores or rejects (a `.mcp.json` with a comment, `servers` or nothing where `mcpServers` belongs) and an entry it skips without a word.
 
   Each finding has the file and the line, what Claude Code does about it, and a fix.
@@ -76,8 +76,8 @@ Read (they change nothing):
   lint     [--project <dir>] [--mcp-config <file>]... [--markdown]
            a name defined in two scopes, a command that is not on the PATH, a ${VAR} that is set
            nowhere, a .mcp.json server nobody approved, a server both enabled and disabled, a list
-           key that holds a plain string, a plain-http URL, an invalid entry or file, names that
-           share a tool prefix. Exit 1 on an error or a warning. --markdown is the short report the
+           key that holds a plain string, a plain-http URL, a credential written out in a .mcp.json,
+           an invalid entry or file, names that share a tool prefix. Exit 1 on an error or a warning. --markdown is the short report the
            /mcp-check:check skill hands to Claude (at most 12 findings, 16 lines); it always exits 0, because
            Claude Code drops a skill whose command fails
 
@@ -136,7 +136,7 @@ claude-mcp-check show
 ```
 
 ```text
-claude-mcp-check 1.1.0  the MCP servers Claude Code would load
+claude-mcp-check 1.2.0  the MCP servers Claude Code would load
 project   /home/me/shop
 config    /home/me/.claude  (from CLAUDE_CONFIG_DIR); servers in ~/.claude/.claude.json
 trust     this folder is trusted
@@ -194,7 +194,7 @@ claude-mcp-check check --timeout 1500
 ```
 
 ```text
-claude-mcp-check 1.1.0  check
+claude-mcp-check 1.2.0  check
 project   /home/me/shop
 timeout   1,500 ms (--timeout)
 
@@ -267,7 +267,7 @@ claude-mcp-check why search --timeout 1500
 ```
 
 ```text
-claude-mcp-check 1.1.0  why search
+claude-mcp-check 1.2.0  why search
 
 cause     variable-unset
 what      ${SEARCH_KEY} is not set
@@ -289,7 +289,7 @@ claude-mcp-check why slow-index --timeout 1500
 ```
 
 ```text
-claude-mcp-check 1.1.0  why slow-index
+claude-mcp-check 1.2.0  why slow-index
 
 cause     timeout
 what      no answer to initialize within 1500 ms
@@ -314,7 +314,7 @@ claude-mcp-check lint
 ```
 
 ```text
-claude-mcp-check 1.1.0  lint
+claude-mcp-check 1.2.0  lint
 project   /home/me/shop
 
 .mcp.json
@@ -454,7 +454,7 @@ It reads the files listed above, on your machine. To find the project key and th
 
 Checked on 2026-10-16 and again on 2026-10-28 on Windows 11 with Node 24.19.0, git 2.55.0 and Claude Code 2.1.295, 2.1.299, 2.1.303, 2.1.310 and 2.1.312 (on 28 October every one of the 61 real-binary checks passed on each of the five; on 16 October the 56 of that day passed on 2.1.295 and 2.1.299). CI runs the unit tests on Linux, macOS and Windows with Node 20, 22 and 24 and on Linux with Node 18. It runs the real-binary checks on Linux and macOS against the npm release of Claude Code (2.1.312 on 28 October 2026). On commit 2783c5a all 10 jobs of the unit tests (run 40670109322) and both jobs of the real-binary checks (run 40670109062) were green, and so were both jobs of the real-binary checks started by hand against 2.1.312 (run 40670167993), 2.1.303 (run 40670183385) and 2.1.299 (run 40670199564). The badges at the top show the latest runs.
 
-- **267 automated tests** (`npm test`, Node's own runner, no dependencies, about 7 seconds). `node --test` also reports each of the six helper files under `test/` as a passing test, on every Node version CI runs (18 to 24); those are not counted here. Without a Claude Code binary 204 pass on Windows and 205 on Linux and macOS (the tests of file modes and of symbolic links are skipped on Windows, the one of `.cmd` files on the other systems). 61 are the real-binary checks below and run only when `E2E_CLAUDE` names a binary. The tests cover:
+- **271 automated tests** (`npm test`, Node's own runner, no dependencies, about 7 seconds). `node --test` also reports each of the six helper files under `test/` as a passing test, on every Node version CI runs (18 to 24); those are not counted here. Without a Claude Code binary 208 pass on Windows and 209 on Linux and macOS (the tests of file modes and of symbolic links are skipped on Windows, the one of `.cmd` files on the other systems). 61 are the real-binary checks below and run only when `E2E_CLAUDE` names a binary. The tests cover:
   - `${VAR}`: every rule of the expansion, with the patterns that the binary was given;
   - the validation of server entries (39 entries in a table, with the words of `claude mcp list`), the allow and deny lists (the matching of names, commands and URL patterns, with the examples of Claude Code's documentation);
   - the editing of JSON by its text: 9 layouts (LF, CRLF, tabs, four spaces, one line, a byte-order mark, no final newline, an empty object) for adding a name to a list and taking it out again, with the same bytes coming back;

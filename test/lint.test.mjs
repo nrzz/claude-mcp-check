@@ -139,6 +139,22 @@ test("literal credentials in a shared .mcp.json: warnings emitted and secrets ar
   assert.ok(!allOut.includes("ghp_0123456789abcdefghijklmnopqrstuv"));
 });
 
+test("a literal written next to a ${VAR} is a literal credential too, and a value that is only references is not; neither is printed", async () => {
+  const w = world("lint-literal-mixed");
+  w.mcpJson({
+    mcpServers: {
+      mixed: { command: "npx", args: ["-y", "mixed-mcp", "--token=abc123secret${X}"], env: { API_KEY: "xyz789secret${Y}" } },
+      refs: { command: "npx", args: ["-y", "refs-mcp", "--token=${X}"], env: { API_KEY: "${Y}" } },
+    },
+  });
+  w.local({ enabledMcpjsonServers: ["mixed", "refs"] });
+  const doc = await lint(w);
+  const found = doc.findings.filter((f) => f.id === "literal-credential");
+  assert.deepEqual(found.map((f) => f.server).sort(), ["mixed", "mixed"]);
+  const everything = JSON.stringify(doc) + (await run(["lint"], w)).out + (await run(["lint", "--markdown"], w)).out + (await run(["show"], w)).out + (await run(["show", "--json"], w)).out;
+  assert.ok(!everything.includes("abc123secret") && !everything.includes("xyz789secret"), "a secret next to a reference is hidden everywhere");
+});
+
 test("a command written as a whole command line: Claude Code does not split it on Linux and macOS, and lint and why say so", async () => {
   const w = world("lint7");
   w.claudeJson({ mcpServers: { s: { command: "definitely-not-installed-xyz -y some-server" } } });
