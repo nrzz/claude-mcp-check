@@ -8,12 +8,21 @@
 //   note      worth knowing, nothing is lost
 import { endpointOf, launchSpec, notFoundWords } from "./launch.mjs";
 import { locator } from "./servers.mjs";
-import { redactUrl } from "./redact.mjs";
+import { looksLikeCredential, redactUrl, SECRET_NAME } from "./redact.mjs";
 import { isObject } from "./jsonfile.mjs";
 
 const SEVERITY = { error: 0, warning: 1, note: 2 };
 const LOOPBACK = /^(localhost|127\.\d+\.\d+\.\d+|\[?::1\]?|0\.0\.0\.0)$/i;
 const listText = (names) => names.map((n) => `"${n}"`).join(", ");
+
+function suggestVar(server, key) {
+  const s = (server || "").replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").toUpperCase();
+  const k = (key || "").replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").toUpperCase();
+  if (!k) return s ? `${s}_TOKEN` : "TOKEN";
+  if (k.startsWith(s)) return k;
+  if (k === "AUTHORIZATION") return s ? `${s}_TOKEN` : "TOKEN";
+  return s ? `${s}_${k}` : k;
+}
 
 /** All the findings for a model, sorted: errors first, then warnings, then notes, each in the order of the places that were read. */
 export function lintModel(ctx, model) {
@@ -89,6 +98,92 @@ export function lintModel(ctx, model) {
     if (view.refs.readAsEmpty.length) {
       const names = [...new Set(view.refs.readAsEmpty.map((m) => m.name))];
       add({ id: "credential-read-as-empty", severity: "warning", effect: "server", ...defFields(def), message: `"${s.name}": ${names.map((n) => `\${${n}}`).join(", ")} in ${[...new Set(view.refs.readAsEmpty.map((m) => m.field))].join(", ")} reads as empty`, does: "Claude Code expands these credential names to nothing in the url and headers of a remote server, set or not", fix: "Copy the value to a variable of your own name and use that." });
+    }
+    // literal credentials in a shared .mcp.json
+    for (const d of s.defs.filter((d) => d.kind === "project" && isObject(d.entry))) {
+      const mcpFile = ctx.mcpJson.find((f) => f.path === d.file);
+      const locate = mcpFile && mcpFile.text ? locator(mcpFile) : null;
+      const addCred = (field, varName, keyPath) => {
+        const line = (locate && locate(["mcpServers", d.name, ...keyPath])) || d.line;
+        add({
+          id: "literal-credential",
+          severity: "warning",
+          effect: "none",
+          server: d.name,
+          file: d.file,
+          display: d.display,
+          line,
+          message: `"${d.name}": ${field} holds a literal credential`,
+          does: "it is shared with everyone who can read the repository",
+          fix: `write \${${varName}} and set it in your environment or in the env of your user settings.json`,
+        });
+      };
+      if (Array.isArray(d.entry.args)) {
+        let prevFlag = null;
+        for (let i = 0; i < d.entry.args.length; i++) {
+          const a = String(d.entry.args[i]);
+          if (prevFlag && !a.startsWith("-")) {
+            if (looksLikeCredential(prevFlag, a)) {
+              addCred(`args[${i}]`, suggestVar(d.name, prevFlag), ["args", i]);
+            }
+            prevFlag = null;
+            continue;
+          }
+          prevFlag = null;
+          const flag = /^(--?[A-Za-z0-9_.-]+)=(.*)$/s.exec(a);
+          if (flag) {
+            if (looksLikeCredential(flag[1], flag[2])) {
+              addCred(`args[${i}]`, suggestVar(d.name, flag[1]), ["args", i]);
+            }
+            continue;
+          }
+          const pair = /^([A-Za-z_][A-Za-z0-9_.]*)=(.*)$/s.exec(a);
+          if (pair) {
+            if (looksLikeCredential(pair[1], pair[2])) {
+              addCred(`args[${i}]`, suggestVar(d.name, pair[1]), ["args", i]);
+            }
+            continue;
+          }
+          if (/^--?[A-Za-z0-9_.-]+$/.test(a) && SECRET_NAME.test(a)) {
+            prevFlag = a;
+            continue;
+          }
+          if (looksLikeCredential(null, a)) {
+            addCred(`args[${i}]`, suggestVar(d.name, "KEY"), ["args", i]);
+            continue;
+          }
+        }
+      }
+      if (isObject(d.entry.env)) {
+        for (const [k, v] of Object.entries(d.entry.env)) {
+          if (typeof v === "string" && looksLikeCredential(k, v)) {
+            addCred(`env.${k}`, suggestVar(d.name, k), ["env", k]);
+          }
+        }
+      }
+      if (isObject(d.entry.headers)) {
+        for (const [k, v] of Object.entries(d.entry.headers)) {
+          if (typeof v === "string" && looksLikeCredential(k, v)) {
+            addCred(`headers.${k}`, suggestVar(d.name, k), ["headers", k]);
+          }
+        }
+      }
+      if (typeof d.entry.url === "string" && d.entry.url) {
+        let u = null;
+        try { u = new URL(d.entry.url); } catch { /* not a URL */ }
+        if (u) {
+          if (u.password && looksLikeCredential("password", decodeURIComponent(u.password))) {
+            addCred("url", suggestVar(d.name, "PASSWORD"), ["url"]);
+          } else {
+            for (const [k, v] of u.searchParams) {
+              if (looksLikeCredential(k, v)) {
+                addCred("url", suggestVar(d.name, k), ["url"]);
+                break;
+              }
+            }
+          }
+        }
+      }
     }
     // remote servers
     if (view.type !== "stdio" && view.url) {

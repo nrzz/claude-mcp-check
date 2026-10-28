@@ -4,6 +4,8 @@ All notable changes to claude-mcp-check are written here. The format follows [Ke
 
 ## [Unreleased]
 
+- `lint`: `literal-credential` finding for a `.mcp.json` that holds a credential written out instead of a `${VAR}` reference.
+
 ## [1.1.0] - 2026-10-28
 
 - **Tool search.** From Claude Code 2.1.304 the MCP tools are deferred behind tool search by default, for every host: the first request carries the names of the tools in a list (with the server instructions), no schema, and a tool's schema is added when the model loads it with `ToolSearch`. Up to 2.1.303 only Anthropic's own host got that; any other `ANTHROPIC_BASE_URL` got the schemas in the request unless `ENABLE_TOOL_SEARCH` was set. The scheduled run of the real-binary checks failed on 26 October on Claude Code 2.1.310 for this reason: it looked for MCP schemas in the request. `check` and `show` had assumed the schemas are up front.
