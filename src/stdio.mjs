@@ -2,7 +2,8 @@
 // launchSpec), performs the MCP handshake over its stdin and stdout, lists what it offers, and ends it. This is the one
 // place that starts a program. Every child it starts is ended before probeStdio returns (stdin closed, then the process
 // tree ended if it is still there 300 ms later, as Claude Code does on Windows), and a process that exits early ends the
-// children that are left.
+// children that are left. The pipes are read until they close (at most a second after the process is gone), because Node
+// fires 'exit' before they are drained and a server that fails at once writes its reason to stderr right before.
 //
 // The protocol is JSON-RPC 2.0, one message per line (the MCP specification, "stdio"): initialize, the initialized
 // notification, then tools/list, resources/list and prompts/list for what the server says it offers.
@@ -59,7 +60,7 @@ function startChild(spec) {
  *   exit        { code, signal, ms } when the process ended by itself before this function ended it
  *   tools, resources, prompts   { ok, items } or { ok: false, error | timeout }, or null when the server does not offer them
  *   other       { lines, samples }: what the server wrote to stdout that is not a JSON-RPC message
- *   stderr      the end of what it wrote to stderr (at most 2,000 characters)
+ *   stderr      the end of what it wrote to stderr (at most 2,000 characters), read until the pipe closes
  */
 export async function probeStdio(spec, { timeoutMs = 30000 } = {}) {
   hook();
@@ -76,6 +77,8 @@ export async function probeStdio(spec, { timeoutMs = 30000 } = {}) {
 
   let exited = false;
   const exitWaiters = [];
+  let closed = false;
+  const closeWaiters = [];
   const pending = new Map();
   let nextId = 0;
   let closedStdin = false;
@@ -94,6 +97,14 @@ export async function probeStdio(spec, { timeoutMs = 30000 } = {}) {
     const timer = setTimeout(() => { exitWaiters.splice(exitWaiters.indexOf(done), 1); resolve(false); }, ms);
     const done = () => { clearTimeout(timer); resolve(true); };
     exitWaiters.push(done);
+  });
+  // 'close' comes once the process has ended and its stdout and stderr pipes are drained and closed; 'exit' can come first
+  child.on("close", () => { closed = true; for (const w of closeWaiters) w(); });
+  const waitClose = (ms) => new Promise((resolve) => {
+    if (closed) return resolve(true);
+    const timer = setTimeout(() => { closeWaiters.splice(closeWaiters.indexOf(done), 1); resolve(false); }, ms);
+    const done = () => { clearTimeout(timer); resolve(true); };
+    closeWaiters.push(done);
   });
 
   child.stdin.on("error", () => { /* the server closed its stdin: the exit event says why */ });
@@ -189,6 +200,8 @@ export async function probeStdio(spec, { timeoutMs = 30000 } = {}) {
       if (process.platform !== "win32") { try { process.kill(-child.pid, "SIGTERM"); } catch { /* gone */ } gone = await waitExit(400); }
       if (!gone) { killTreeSync(child); gone = await waitExit(2000); }
     }
+    // what the server wrote just before it ended may still be in the pipes: read them to the end before destroying them
+    if (gone && !res.spawnError) await waitClose(1000);
     live.delete(child);
     for (const s of [child.stdout, child.stderr, child.stdin]) { try { s.destroy(); } catch { /* closed */ } }
     try { child.unref(); } catch { /* gone */ }

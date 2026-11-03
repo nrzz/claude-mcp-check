@@ -107,6 +107,26 @@ test("a server that exits before the handshake: its exit code and the end of its
   assert.match(r.stderr, /the API_KEY variable is not set/);
 });
 
+test("what the server wrote to stderr just before it exited is kept, also when the pipe delivers it after the exit event", async () => {
+  // Node fires a child's 'exit' before its stdio pipes are drained, so a line written right before an early exit can
+  // reach the probe after the process is gone; on a busy machine the weekly real-binary run of 2 November 2026 lost the
+  // early-exit server's stderr that way on Ubuntu, and `why` said the server wrote nothing. A grandchild that holds the
+  // stderr pipe for a moment and writes late makes that order certain.
+  const w = world("stdio-late");
+  const grandchild = "setTimeout(() => { process.stderr.write('late: the API_KEY variable is not set\\n'); }, 150)";
+  const program = `const { spawn } = require("node:child_process"); spawn(process.execPath, ["-e", ${JSON.stringify(grandchild)}], { detached: true, stdio: ["ignore", "ignore", "inherit"] }).unref(); process.stderr.write("fake-mcp: fatal\\n"); process.exit(5);`;
+  w.claudeJson({ mcpServers: { x: { command: NODE, args: ["-e", program] } } });
+  const ctx = loadContext({ project: w.work, env: w.env, home: w.home, managed: w.managedDir, mcpJsonRoot: w.base });
+  const t0 = Date.now();
+  const r = await probeStdio(launchSpec(buildModel(ctx).servers[0].def, ctx), { timeoutMs: 5000 });
+  assert.equal(r.initialize, null);
+  assert.equal(r.exit.code, 5);
+  assert.equal(r.killed, false);
+  assert.match(r.stderr, /^fake-mcp: fatal\n/, "what was written before the exit");
+  assert.match(r.stderr, /late: the API_KEY variable is not set/, "and what the pipe delivered after it");
+  assert.ok(Date.now() - t0 < 3000, "the wait for the pipe is short");
+});
+
 test("a server that answers initialize with an error, and one that never answers", async () => {
   const bad = await probe("init-error");
   assert.equal(bad.r.initialize.ok, false);

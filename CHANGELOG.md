@@ -4,6 +4,10 @@ All notable changes to claude-mcp-check are written here. The format follows [Ke
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-03
+
+- `check` and `why`: what a server wrote to stderr just before it exited is kept. Node fires a process's `exit` before its stdout and stderr pipes are drained, and the probe destroyed the pipes on `exit`, so on a busy machine the reason a server failed at once could be lost and `why` said "It wrote nothing to stderr." The weekly run of the real-binary checks lost it that way on 2 November 2026 on Ubuntu (Claude Code 2.1.316; the other 60 checks passed, and the re-run of the same commit was green, so the binary had not changed). The pipes are now read until they close, at most a second after the process is gone; a test holds the stderr pipe open past the exit and writes late to prove the order.
+
 ## [1.2.0] - 2026-10-28
 
 - `lint`: `literal-credential`, a warning for a `.mcp.json` that holds a credential written out instead of a `${VAR}` reference: the value of a flag (`--api-key sk-...`, `--token=...`), an `env` value, a header, the password or a secret-named value of a URL. It names the server, the file, the line and the field, never the value; a `${VAR}` reference, with or without a default, is never a finding, and `~/.claude.json` is private and is not checked. `looksLikeCredential` in `src/redact.mjs` is the one test that the redaction and the lint share.
@@ -29,6 +33,7 @@ All notable changes to claude-mcp-check are written here. The format follows [Ke
 - What Claude Code does is what the real binary did: `test/e2e-claude.test.mjs` puts the sources, the states, the expansion, the command lookup, the policy lists, the tools of a run and the toggles to Claude Code 2.1.295 and 2.1.299 on Windows, and the same checks run in CI on Linux and macOS (2.1.295, 2.1.299 and 2.1.301 were run there). The two systems differ in how a command written as one string is read (split on Windows, not on Linux and macOS) and in what a missing command is reported as; the tool follows each (README "What was verified").
 - Zero tokens for the tool. The skill is user-only, adds nothing to a request that does not use it, and hands the model a report of at most 12 findings.
 
+[1.2.1]: https://github.com/nrzz/claude-mcp-check/releases/tag/v1.2.1
 [1.2.0]: https://github.com/nrzz/claude-mcp-check/releases/tag/v1.2.0
 [1.1.0]: https://github.com/nrzz/claude-mcp-check/releases/tag/v1.1.0
 [1.0.0]: https://github.com/nrzz/claude-mcp-check/releases/tag/v1.0.0
